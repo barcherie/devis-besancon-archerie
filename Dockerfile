@@ -15,4 +15,3 @@ RUN npm run build
 EXPOSE 3000
 
 CMD ["npm", "run", "docker-start"]
-CMD ["sh", "-c", "npm run docker-start || sleep 3600"]
