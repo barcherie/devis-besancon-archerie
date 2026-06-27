@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "526a5ce3e70ac928d897ecbb3e6c6d81"
-application_url = "https://example.com"
+client_id = "922401ef06a22edbb45d66872d42d3e9"
+application_url = "http://oyc8kx1i6sdeg5gjjywcj42t.217.160.121.83.sslip.io"
 embedded = true
 name = "devis-besancon-archerie"
 
@@ -45,7 +45,7 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "http://oyc8kx1i6sdeg5gjjywcj42t.217.160.121.83.sslip.io/api/auth" ]
 
 [build]
 include_config_on_deploy = true
