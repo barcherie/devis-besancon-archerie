@@ -19,8 +19,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             node {
               id
               displayName
-              email
-              phone
+              defaultEmailAddress {
+                emailAddress
+              }
+              defaultPhoneNumber {
+                phoneNumber
+              }
               defaultAddress {
                 company
                 address1
@@ -51,8 +55,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return {
         id: customer.id,
         name: customer.displayName || "",
-        email: customer.email || "",
-        phone: customer.phone || "",
+        email: customer.defaultEmailAddress?.emailAddress || "",
+        phone: customer.defaultPhoneNumber?.phoneNumber || "",
         company: address.company || "",
         address1: address.address1 || "",
         address2: address.address2 || "",
