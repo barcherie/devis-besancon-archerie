@@ -19,20 +19,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             node {
               id
               displayName
-              defaultEmailAddress {
-                emailAddress
-              }
-              defaultPhoneNumber {
-                phoneNumber
-              }
-              defaultAddress {
-                company
-                address1
-                address2
-                zip
-                city
-                country
-              }
             }
           }
         }
@@ -47,24 +33,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const json = await response.json();
 
-  const customers =
-    json.data?.customers?.edges?.map((edge: any) => {
-      const customer = edge.node;
-      const address = customer.defaultAddress || {};
+  if (json.errors) {
+    console.error("CUSTOMER_SEARCH_GRAPHQL_ERROR", JSON.stringify(json.errors));
+    return Response.json({ customers: [], error: json.errors }, { status: 500 });
+  }
 
-      return {
-        id: customer.id,
-        name: customer.displayName || "",
-        email: customer.defaultEmailAddress?.emailAddress || "",
-        phone: customer.defaultPhoneNumber?.phoneNumber || "",
-        company: address.company || "",
-        address1: address.address1 || "",
-        address2: address.address2 || "",
-        zip: address.zip || "",
-        city: address.city || "",
-        country: address.country || "",
-      };
-    }) || [];
+  const customers =
+    json.data?.customers?.edges?.map((edge: any) => ({
+      id: edge.node.id,
+      name: edge.node.displayName || "",
+      email: "",
+      phone: "",
+      company: "",
+      address1: "",
+      address2: "",
+      zip: "",
+      city: "",
+      country: "",
+    })) || [];
 
   return Response.json({ customers });
 };
