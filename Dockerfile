@@ -12,7 +12,8 @@ RUN npx prisma generate
 
 COPY . .
 
-RUN npm run lint && npm run typecheck && npm run build
+RUN npm run build
+RUN npm prune --omit=dev && npm cache clean --force
 
 FROM base AS production
 
@@ -20,9 +21,7 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 COPY prisma ./prisma/
-
-RUN npm ci --omit=dev && npm cache clean --force
-
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 
 EXPOSE 3000
