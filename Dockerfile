@@ -13,7 +13,19 @@ RUN npx prisma generate
 COPY . .
 
 RUN npm run build
-RUN npm prune --omit=dev && npm cache clean --force
+
+FROM base AS production-dependencies
+
+# Cette copie force BuildKit à attendre la fin du build et évite deux
+# installations npm simultanées sur les petits VPS.
+COPY --from=build /app/package.json ./package.json
+COPY package-lock.json ./
+COPY prisma ./prisma/
+
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Le client Prisma a été généré durant le build avec les outils de développement.
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 
 FROM base AS production
 
@@ -21,7 +33,7 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 COPY prisma ./prisma/
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 
 EXPOSE 3000
