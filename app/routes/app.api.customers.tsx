@@ -1,6 +1,20 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 
+type CustomerSearchResponse = {
+  data?: {
+    customers?: {
+      edges?: Array<{
+        node: {
+          id: string;
+          displayName?: string | null;
+        };
+      }>;
+    };
+  };
+  errors?: unknown;
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
 
@@ -31,7 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   );
 
-  const json = await response.json();
+  const json = (await response.json()) as CustomerSearchResponse;
 
   if (json.errors) {
     console.error("CUSTOMER_SEARCH_GRAPHQL_ERROR", JSON.stringify(json.errors));
@@ -39,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const customers =
-    json.data?.customers?.edges?.map((edge: any) => ({
+    json.data?.customers?.edges?.map((edge) => ({
       id: edge.node.id,
       name: edge.node.displayName || "",
       email: "",

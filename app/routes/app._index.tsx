@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFPage, StandardFonts, rgb } from "pdf-lib";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -34,6 +34,26 @@ type CustomerResult = {
   country: string;
 };
 
+type PickerImage = {
+  url?: string;
+  originalSrc?: string;
+};
+
+type PickerVariant = {
+  id: string;
+  title?: string;
+  sku?: string;
+  price?: string | number;
+};
+
+type PickerProduct = {
+  id: string;
+  title?: string;
+  featuredImage?: PickerImage;
+  images?: PickerImage[];
+  variants?: PickerVariant[];
+};
+
 function formatMoney(value: number) {
   return `${value.toFixed(2).replace(".", ",")} €`;
 }
@@ -51,7 +71,7 @@ function generateQuoteNumber() {
   return `${pad(now.getDate())}${pad(now.getMonth() + 1)}${now.getFullYear()}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
-function getProductImage(product: any) {
+function getProductImage(product: PickerProduct) {
   return (
     product.featuredImage?.url ||
     product.featuredImage?.originalSrc ||
@@ -63,7 +83,7 @@ function getProductImage(product: any) {
 
 async function drawProductImage(
   pdfDoc: PDFDocument,
-  page: any,
+  page: PDFPage,
   imageUrl: string,
   x: number,
   y: number,
@@ -152,14 +172,17 @@ export default function Index() {
 
     const newLines: QuoteLine[] = [];
 
-    selected.forEach((product: any) => {
+    const products = selected as PickerProduct[];
+
+    products.forEach((product) => {
       const variants = product.variants || [];
       const imageUrl = getProductImage(product);
+      const productTitle = product.title || "Produit sélectionné";
 
       if (variants.length === 0) {
         newLines.push({
           id: product.id,
-          title: product.title || "Produit sélectionné",
+          title: productTitle,
           sku: "",
           quantity: 1,
           priceTtc: 0,
@@ -168,13 +191,13 @@ export default function Index() {
         return;
       }
 
-      variants.forEach((variant: any) => {
+      variants.forEach((variant) => {
         newLines.push({
           id: variant.id,
           title:
             variant.title && variant.title !== "Default Title"
-              ? `${product.title} - ${variant.title}`
-              : product.title,
+              ? `${productTitle} - ${variant.title}`
+              : productTitle,
           sku: variant.sku || "",
           quantity: 1,
           priceTtc: Number(variant.price || 0),
