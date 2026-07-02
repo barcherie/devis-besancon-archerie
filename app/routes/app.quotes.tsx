@@ -123,13 +123,40 @@ export default function QuotesPage() {
     }
   };
 
+  const downloadPdf = async (id: string, number: string) => {
+    setProcessingId(id);
+    try {
+      const response = await fetch(`/app/api/quotes/${id}/pdf`);
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(result?.error || "Génération du PDF impossible");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `devis-${number}-besancon-archerie.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      shopify.toast.show(`PDF du devis ${number} généré`);
+    } catch (error) {
+      shopify.toast.show(
+        error instanceof Error ? error.message : "Génération impossible",
+        { isError: true },
+      );
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   return (
     <s-page heading="Mes devis">
-      <s-button
-        slot="primary-action"
-        variant="primary"
-        href="/app/quotes/new"
-      >
+      <s-button slot="primary-action" variant="primary" href="/app/quotes/new">
         Nouveau devis
       </s-button>
 
@@ -173,8 +200,8 @@ export default function QuotesPage() {
                     Modifier
                   </s-button>
                   <s-button
-                    href={`/app/quotes/${quote.id}?download=pdf`}
                     disabled={processingId === quote.id}
+                    onClick={() => void downloadPdf(quote.id, quote.number)}
                   >
                     Générer le PDF
                   </s-button>
@@ -189,9 +216,7 @@ export default function QuotesPage() {
                     <s-button
                       variant="primary"
                       disabled={processingId === quote.id}
-                      onClick={() =>
-                        void convertQuote(quote.id, quote.number)
-                      }
+                      onClick={() => void convertQuote(quote.id, quote.number)}
                     >
                       Valider et créer la commande
                     </s-button>

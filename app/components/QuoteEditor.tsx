@@ -10,7 +10,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { LegalInfo } from "../shop-settings.server";
 
-const APP_VERSION = "V1.13";
+const APP_VERSION = "V1.14";
 
 export type QuoteLine = {
   id: string;
