@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  PDFDocument,
-  PDFFont,
-  PDFPage,
-  StandardFonts,
-  rgb,
-} from "pdf-lib";
+import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { LegalInfo } from "../shop-settings.server";
 
-const APP_VERSION = "V1.14";
+const APP_VERSION = "V1.15";
 
 export type QuoteLine = {
   id: string;
@@ -114,6 +108,17 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
   return lines;
 }
 
+function pdfColor(hex: string, fallback: [number, number, number]) {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return rgb(...fallback);
+  const value = Number.parseInt(match[1], 16);
+  return rgb(
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  );
+}
+
 function getLineAmounts(line: QuoteLine) {
   const grossTtc = line.priceTtc * line.quantity;
   const discount = grossTtc * (line.discountPercent / 100);
@@ -139,6 +144,8 @@ async function drawProductImage(
   imageUrl: string,
   x: number,
   y: number,
+  width = 32,
+  height = 32,
 ) {
   if (!imageUrl) return;
 
@@ -151,7 +158,7 @@ async function drawProductImage(
       ? await pdfDoc.embedPng(imageBytes)
       : await pdfDoc.embedJpg(imageBytes);
 
-    page.drawImage(image, { x, y, width: 32, height: 32 });
+    page.drawImage(image, { x, y, width, height });
   } catch (error) {
     console.warn("Image non intégrée au PDF :", error);
   }
@@ -194,9 +201,7 @@ export default function QuoteEditor({
   const [clientName, setClientName] = useState(
     initialQuote?.customerName || "",
   );
-  const [company, setCompany] = useState(
-    initialQuote?.customerCompany || "",
-  );
+  const [company, setCompany] = useState(initialQuote?.customerCompany || "");
   const [address1, setAddress1] = useState(
     initialQuote?.customerAddress1 || "",
   );
@@ -205,19 +210,13 @@ export default function QuoteEditor({
   );
   const [zip, setZip] = useState(initialQuote?.customerZip || "");
   const [city, setCity] = useState(initialQuote?.customerCity || "");
-  const [country, setCountry] = useState(
-    initialQuote?.customerCountry || "",
-  );
+  const [country, setCountry] = useState(initialQuote?.customerCountry || "");
   const [email, setEmail] = useState(initialQuote?.customerEmail || "");
   const [phone, setPhone] = useState(initialQuote?.customerPhone || "");
 
-  const [lines, setLines] = useState<QuoteLine[]>(
-    initialQuote?.lines || [],
-  );
+  const [lines, setLines] = useState<QuoteLine[]>(initialQuote?.lines || []);
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(
-    initialQuote
-      ? { id: initialQuote.id, number: initialQuote.number }
-      : null,
+    initialQuote ? { id: initialQuote.id, number: initialQuote.number } : null,
   );
   const [isSaving, setIsSaving] = useState(false);
 
@@ -421,8 +420,8 @@ export default function QuoteEditor({
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const navy = rgb(0.08, 0.13, 0.2);
-    const gold = rgb(0.82, 0.62, 0.2);
+    const navy = pdfColor(legalInfo.primaryColor, [0.08, 0.13, 0.2]);
+    const gold = pdfColor(legalInfo.accentColor, [0.82, 0.62, 0.2]);
     const lightGold = rgb(0.97, 0.95, 0.89);
     const pale = rgb(0.96, 0.97, 0.98);
     const grey = rgb(0.38, 0.42, 0.47);
@@ -446,7 +445,7 @@ export default function QuoteEditor({
       });
     };
 
-    const drawHeader = (targetPage: PDFPage, continuation = false) => {
+    const drawHeader = async (targetPage: PDFPage, continuation = false) => {
       targetPage.drawRectangle({
         x: 0,
         y: 742,
@@ -461,17 +460,31 @@ export default function QuoteEditor({
         height: 6,
         color: gold,
       });
+      if (legalInfo.logoDataUrl) {
+        await drawProductImage(
+          pdfDoc,
+          targetPage,
+          legalInfo.logoDataUrl,
+          40,
+          762,
+          54,
+          54,
+        );
+      }
       targetPage.drawText(legalInfo.companyName.toUpperCase(), {
-        x: 40,
+        x: legalInfo.logoDataUrl ? 108 : 40,
         y: 790,
         size: 20,
         font: bold,
         color: white,
       });
-      targetPage.drawText(
-        continuation ? "DEVIS - SUITE" : "DEVIS",
-        { x: 40, y: 765, size: 10, font: bold, color: gold },
-      );
+      targetPage.drawText(continuation ? "DEVIS - SUITE" : "DEVIS", {
+        x: 40,
+        y: 765,
+        size: 10,
+        font: bold,
+        color: gold,
+      });
       drawRight(targetPage, quoteNumber, 555, 786, 15, bold, white);
       drawRight(
         targetPage,
@@ -513,14 +526,14 @@ export default function QuoteEditor({
       return startY - 40;
     };
 
-    const addContinuationPage = () => {
+    const addContinuationPage = async () => {
       const targetPage = pdfDoc.addPage([595, 842]);
-      drawHeader(targetPage, true);
+      await drawHeader(targetPage, true);
       return { targetPage, startY: drawTableHeader(targetPage, 700) };
     };
 
     let page = pdfDoc.addPage([595, 842]);
-    drawHeader(page);
+    await drawHeader(page);
 
     const sellerLines = [
       legalInfo.companyName,
@@ -555,16 +568,25 @@ export default function QuoteEditor({
         borderColor: rgb(0.88, 0.89, 0.91),
         borderWidth: 0.7,
       });
-      page.drawText(title, { x: x + 14, y: 683, size: 8, font: bold, color: gold });
+      page.drawText(title, {
+        x: x + 14,
+        y: 683,
+        size: 8,
+        font: bold,
+        color: gold,
+      });
       let cardY = 665;
       cardLines.slice(0, 7).forEach((value, index) => {
-        page.drawText(fitText(value, index === 0 ? bold : font, 8.5, width - 28), {
-          x: x + 14,
-          y: cardY,
-          size: 8.5,
-          font: index === 0 ? bold : font,
-          color: navy,
-        });
+        page.drawText(
+          fitText(value, index === 0 ? bold : font, 8.5, width - 28),
+          {
+            x: x + 14,
+            y: cardY,
+            size: 8.5,
+            font: index === 0 ? bold : font,
+            color: navy,
+          },
+        );
         cardY -= 13;
       });
     };
@@ -576,7 +598,7 @@ export default function QuoteEditor({
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (y < 180) {
-        const continuation = addContinuationPage();
+        const continuation = await addContinuationPage();
         page = continuation.targetPage;
         y = continuation.startY;
       }
@@ -627,7 +649,7 @@ export default function QuoteEditor({
 
     if (y < 390) {
       page = pdfDoc.addPage([595, 842]);
-      drawHeader(page, true);
+      await drawHeader(page, true);
       y = 680;
     }
 
@@ -696,18 +718,21 @@ export default function QuoteEditor({
 
     const pages = pdfDoc.getPages();
     const legalLine = [
-      [legalInfo.legalForm, legalInfo.shareCapital
-        ? `au capital de ${legalInfo.shareCapital}`
-        : ""].filter(Boolean).join(" "),
+      [
+        legalInfo.legalForm,
+        legalInfo.shareCapital ? `au capital de ${legalInfo.shareCapital}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
       legalInfo.siren ? `SIREN ${legalInfo.siren}` : "",
       legalInfo.siret ? `SIRET ${legalInfo.siret}` : "",
       legalInfo.vatNumber ? `TVA ${legalInfo.vatNumber}` : "",
-    ].filter(Boolean).join("  •  ");
-    const contactLine = [
-      legalInfo.email,
-      legalInfo.phone,
-      legalInfo.website,
-    ].filter(Boolean).join("  •  ");
+    ]
+      .filter(Boolean)
+      .join("  •  ");
+    const contactLine = [legalInfo.email, legalInfo.phone, legalInfo.website]
+      .filter(Boolean)
+      .join("  •  ");
 
     pages.forEach((pdfPage, index) => {
       pdfPage.drawRectangle({
@@ -1008,9 +1033,7 @@ export default function QuoteEditor({
                     <s-text>HT : {formatMoney(amounts.ht)}</s-text>
                     <s-text>TVA : {formatMoney(amounts.vat)}</s-text>
                     {amounts.discount > 0 && (
-                      <s-text>
-                        Remise : -{formatMoney(amounts.discount)}
-                      </s-text>
+                      <s-text>Remise : -{formatMoney(amounts.discount)}</s-text>
                     )}
                     <s-text>Total TTC : {formatMoney(amounts.ttc)}</s-text>
 
@@ -1055,9 +1078,12 @@ export default function QuoteEditor({
         <s-paragraph>
           {legalInfo.companyName}
           <br />
-          {[legalInfo.legalForm, legalInfo.shareCapital
-            ? `au capital de ${legalInfo.shareCapital}`
-            : ""]
+          {[
+            legalInfo.legalForm,
+            legalInfo.shareCapital
+              ? `au capital de ${legalInfo.shareCapital}`
+              : "",
+          ]
             .filter(Boolean)
             .join(" ")}
           <br />

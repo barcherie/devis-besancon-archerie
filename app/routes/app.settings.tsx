@@ -30,9 +30,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const body = (await request.json().catch(() => null)) as
-    | Partial<Record<keyof LegalInfo, unknown>>
-    | null;
+  const body = (await request.json().catch(() => null)) as Partial<
+    Record<keyof LegalInfo, unknown>
+  > | null;
 
   if (!body) {
     return Response.json({ error: "Données invalides" }, { status: 400 });
@@ -46,9 +46,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             .trim()
             .slice(
               0,
-              key === "additionalLegal" || key === "bankTransferInfo"
-                ? 1000
-                : 200,
+              key === "logoDataUrl"
+                ? 1_500_000
+                : key === "additionalLegal" || key === "bankTransferInfo"
+                  ? 1000
+                  : 200,
             )
         : "",
     ]),
@@ -57,6 +59,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!settings.companyName) {
     return Response.json(
       { error: "La raison sociale est obligatoire" },
+      { status: 400 },
+    );
+  }
+
+  if (
+    !/^#[0-9a-f]{6}$/i.test(settings.primaryColor) ||
+    !/^#[0-9a-f]{6}$/i.test(settings.accentColor)
+  ) {
+    return Response.json(
+      { error: "Les couleurs doivent être au format #RRGGBB" },
+      { status: 400 },
+    );
+  }
+
+  if (
+    settings.logoDataUrl &&
+    !/^data:image\/(png|jpeg);base64,/i.test(settings.logoDataUrl)
+  ) {
+    return Response.json(
+      { error: "Le logo doit être une image PNG ou JPG" },
       { status: 400 },
     );
   }
@@ -108,8 +130,28 @@ export default function SettingsPage() {
     });
   };
 
+  const selectLogo = (file?: File) => {
+    if (!file) return;
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      shopify.toast.show("Choisis une image PNG ou JPG", { isError: true });
+      return;
+    }
+    if (file.size > 1_000_000) {
+      shopify.toast.show("Le logo ne doit pas dépasser 1 Mo", {
+        isError: true,
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => update("logoDataUrl", String(reader.result || ""));
+    reader.onerror = () =>
+      shopify.toast.show("Impossible de lire cette image", { isError: true });
+    reader.readAsDataURL(file);
+  };
+
   return (
-    <s-page heading="Mes informations">
+    <s-page heading="Paramètres">
       <s-button
         slot="primary-action"
         variant="primary"
@@ -119,18 +161,95 @@ export default function SettingsPage() {
         {isSaving ? "Enregistrement…" : "Enregistrer"}
       </s-button>
 
+      <s-section heading="Identité visuelle du PDF">
+        <s-stack gap="base">
+          {settings.logoDataUrl && (
+            <img
+              src={settings.logoDataUrl}
+              alt="Aperçu du logo"
+              style={{
+                width: 160,
+                height: 90,
+                objectFit: "contain",
+                objectPosition: "left center",
+              }}
+            />
+          )}
+          <label>
+            Logo PNG ou JPG (1 Mo maximum)
+            <br />
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(event) => selectLogo(event.currentTarget.files?.[0])}
+            />
+          </label>
+          {settings.logoDataUrl && (
+            <s-button
+              tone="critical"
+              variant="tertiary"
+              onClick={() => update("logoDataUrl", "")}
+            >
+              Supprimer le logo
+            </s-button>
+          )}
+          <s-stack direction="inline" gap="base">
+            <label>
+              Couleur principale
+              <br />
+              <input
+                type="color"
+                value={settings.primaryColor}
+                onChange={(event) =>
+                  update("primaryColor", event.currentTarget.value)
+                }
+              />
+            </label>
+            <s-text-field
+              label="Code couleur principale"
+              value={settings.primaryColor}
+              onInput={(event) =>
+                update("primaryColor", event.currentTarget.value)
+              }
+            />
+            <label>
+              Couleur d’accent
+              <br />
+              <input
+                type="color"
+                value={settings.accentColor}
+                onChange={(event) =>
+                  update("accentColor", event.currentTarget.value)
+                }
+              />
+            </label>
+            <s-text-field
+              label="Code couleur d’accent"
+              value={settings.accentColor}
+              onInput={(event) =>
+                update("accentColor", event.currentTarget.value)
+              }
+            />
+          </s-stack>
+        </s-stack>
+      </s-section>
+
       <s-section heading="Entreprise">
         <s-stack gap="base">
           <s-text-field
             label="Raison sociale"
             value={settings.companyName}
-            onInput={(event) => update("companyName", event.currentTarget.value)}
+            onInput={(event) =>
+              update("companyName", event.currentTarget.value)
+            }
           />
           <s-stack direction="inline" gap="base">
             <s-text-field
               label="Forme juridique"
               value={settings.legalForm}
-              onInput={(event) => update("legalForm", event.currentTarget.value)}
+              onInput={(event) =>
+                update("legalForm", event.currentTarget.value)
+              }
             />
             <s-text-field
               label="Capital social"
@@ -154,7 +273,9 @@ export default function SettingsPage() {
             <s-text-field
               label="N° de TVA"
               value={settings.vatNumber}
-              onInput={(event) => update("vatNumber", event.currentTarget.value)}
+              onInput={(event) =>
+                update("vatNumber", event.currentTarget.value)
+              }
             />
           </s-stack>
         </s-stack>

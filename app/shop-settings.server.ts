@@ -18,6 +18,9 @@ export const defaultShopSettings = {
   additionalLegal: "",
   bankTransferInfo:
     "Informations en cas de virement :\nIBAN : FR76 1080 7000 3312 5212 1202 213\nBIC : CCBPFRPPDJN",
+  logoDataUrl: "",
+  primaryColor: "#141F33",
+  accentColor: "#D19E33",
 };
 
 export type LegalInfo = typeof defaultShopSettings;
@@ -43,5 +46,8 @@ export async function getShopSettings(shop: string): Promise<LegalInfo> {
     website: settings.website,
     additionalLegal: settings.additionalLegal,
     bankTransferInfo: settings.bankTransferInfo,
+    logoDataUrl: settings.logoDataUrl,
+    primaryColor: settings.primaryColor,
+    accentColor: settings.accentColor,
   };
 }

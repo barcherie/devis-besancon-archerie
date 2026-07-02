@@ -1,0 +1,4 @@
+ALTER TABLE "ShopSettings"
+    ADD COLUMN "logoDataUrl" TEXT NOT NULL DEFAULT '',
+    ADD COLUMN "primaryColor" TEXT NOT NULL DEFAULT '#141F33',
+    ADD COLUMN "accentColor" TEXT NOT NULL DEFAULT '#D19E33';

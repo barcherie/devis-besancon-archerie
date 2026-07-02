@@ -73,12 +73,25 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
   return lines;
 }
 
+function pdfColor(hex: string, fallback: [number, number, number]) {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return rgb(...fallback);
+  const value = Number.parseInt(match[1], 16);
+  return rgb(
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  );
+}
+
 async function drawImage(
   pdf: PDFDocument,
   page: PDFPage,
   url: string,
   x: number,
   y: number,
+  width = 32,
+  height = 32,
 ) {
   if (!url) return;
   try {
@@ -88,7 +101,7 @@ async function drawImage(
     const image = (response.headers.get("content-type") || "").includes("png")
       ? await pdf.embedPng(bytes)
       : await pdf.embedJpg(bytes);
-    page.drawImage(image, { x, y, width: 32, height: 32 });
+    page.drawImage(image, { x, y, width, height });
   } catch {
     // Une image distante indisponible ne doit pas bloquer le devis.
   }
@@ -98,8 +111,8 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const navy = rgb(0.08, 0.13, 0.2);
-  const gold = rgb(0.82, 0.62, 0.2);
+  const navy = pdfColor(legal.primaryColor, [0.08, 0.13, 0.2]);
+  const gold = pdfColor(legal.accentColor, [0.82, 0.62, 0.2]);
   const lightGold = rgb(0.97, 0.95, 0.89);
   const pale = rgb(0.96, 0.97, 0.98);
   const grey = rgb(0.38, 0.42, 0.47);
@@ -123,11 +136,14 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     });
   };
 
-  const drawHeader = (page: PDFPage, continuation = false) => {
+  const drawHeader = async (page: PDFPage, continuation = false) => {
     page.drawRectangle({ x: 0, y: 742, width: 595, height: 100, color: navy });
     page.drawRectangle({ x: 0, y: 736, width: 595, height: 6, color: gold });
+    if (legal.logoDataUrl) {
+      await drawImage(pdf, page, legal.logoDataUrl, 40, 762, 54, 54);
+    }
     page.drawText(legal.companyName.toUpperCase(), {
-      x: 40,
+      x: legal.logoDataUrl ? 108 : 40,
       y: 790,
       size: 20,
       font: bold,
@@ -182,14 +198,14 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     return startY - 40;
   };
 
-  const addContinuationPage = () => {
+  const addContinuationPage = async () => {
     const page = pdf.addPage([595, 842]);
-    drawHeader(page, true);
+    await drawHeader(page, true);
     return { page, y: drawTableHeader(page, 700) };
   };
 
   let page = pdf.addPage([595, 842]);
-  drawHeader(page);
+  await drawHeader(page);
 
   const sellerLines = [
     legal.companyName,
@@ -245,7 +261,7 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
   for (let index = 0; index < quote.lines.length; index += 1) {
     const line = quote.lines[index];
     if (y < 180) {
-      const continuation = addContinuationPage();
+      const continuation = await addContinuationPage();
       page = continuation.page;
       y = continuation.y;
     }
@@ -294,7 +310,7 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
 
   if (y < 390) {
     page = pdf.addPage([595, 842]);
-    drawHeader(page, true);
+    await drawHeader(page, true);
     y = 680;
   }
 

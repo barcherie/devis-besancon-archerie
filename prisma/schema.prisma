@@ -66,6 +66,9 @@ model ShopSettings {
   website          String   @default("")
   additionalLegal  String   @default("")
   bankTransferInfo String   @default("Informations en cas de virement :\nIBAN : FR76 1080 7000 3312 5212 1202 213\nBIC : CCBPFRPPDJN")
+  logoDataUrl      String   @default("")
+  primaryColor     String   @default("#141F33")
+  accentColor      String   @default("#D19E33")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
