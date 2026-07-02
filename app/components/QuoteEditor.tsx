@@ -1,8 +1,16 @@
 import { useState } from "react";
-import { PDFDocument, PDFPage, StandardFonts, rgb } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFFont,
+  PDFPage,
+  StandardFonts,
+  rgb,
+} from "pdf-lib";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
-const APP_VERSION = "V1.10";
+import type { LegalInfo } from "../shop-settings.server";
+
+const APP_VERSION = "V1.11";
 
 export type QuoteLine = {
   id: string;
@@ -75,6 +83,37 @@ function formatMoney(value: number) {
   return `${value.toFixed(2).replace(".", ",")} €`;
 }
 
+function fitText(text: string, font: PDFFont, size: number, maxWidth: number) {
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let value = text;
+  while (
+    value.length > 1 &&
+    font.widthOfTextAtSize(`${value}...`, size) > maxWidth
+  ) {
+    value = value.slice(0, -1);
+  }
+  return `${value}...`;
+}
+
+function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\r?\n/)) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+        line = candidate;
+      } else {
+        if (line) lines.push(line);
+        line = fitText(word, font, size, maxWidth);
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
 function getLineAmounts(line: QuoteLine) {
   const grossTtc = line.priceTtc * line.quantity;
   const discount = grossTtc * (line.discountPercent / 100);
@@ -120,8 +159,10 @@ async function drawProductImage(
 
 export default function QuoteEditor({
   initialQuote,
+  legalInfo,
 }: {
   initialQuote?: InitialQuote;
+  legalInfo: LegalInfo;
 }) {
   const shopify = useAppBridge();
 
@@ -374,234 +415,315 @@ export default function QuoteEditor({
     if (!quote) return;
 
     const quoteNumber = quote.number;
-
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const navy = rgb(0.08, 0.13, 0.2);
+    const gold = rgb(0.82, 0.62, 0.2);
+    const lightGold = rgb(0.97, 0.95, 0.89);
+    const pale = rgb(0.96, 0.97, 0.98);
+    const grey = rgb(0.38, 0.42, 0.47);
+    const white = rgb(1, 1, 1);
+
+    const drawRight = (
+      targetPage: PDFPage,
+      text: string,
+      right: number,
+      y: number,
+      size: number,
+      targetFont = font,
+      color = navy,
+    ) => {
+      targetPage.drawText(text, {
+        x: right - targetFont.widthOfTextAtSize(text, size),
+        y,
+        size,
+        font: targetFont,
+        color,
+      });
+    };
+
+    const drawHeader = (targetPage: PDFPage, continuation = false) => {
+      targetPage.drawRectangle({
+        x: 0,
+        y: 742,
+        width: 595,
+        height: 100,
+        color: navy,
+      });
+      targetPage.drawRectangle({
+        x: 0,
+        y: 736,
+        width: 595,
+        height: 6,
+        color: gold,
+      });
+      targetPage.drawText(legalInfo.companyName.toUpperCase(), {
+        x: 40,
+        y: 790,
+        size: 20,
+        font: bold,
+        color: white,
+      });
+      targetPage.drawText(
+        continuation ? "DEVIS - SUITE" : "DEVIS",
+        { x: 40, y: 765, size: 10, font: bold, color: gold },
+      );
+      drawRight(targetPage, quoteNumber, 555, 786, 15, bold, white);
+      drawRight(
+        targetPage,
+        new Date().toLocaleDateString("fr-FR"),
+        555,
+        765,
+        9,
+        font,
+        white,
+      );
+    };
 
     const drawTableHeader = (targetPage: PDFPage, startY: number) => {
-      targetPage.drawText("Image", { x: 40, y: startY, size: 8, font: bold });
-      targetPage.drawText("Désignation", {
-        x: 82,
-        y: startY,
-        size: 8,
-        font: bold,
+      targetPage.drawRectangle({
+        x: 40,
+        y: startY - 7,
+        width: 515,
+        height: 27,
+        color: navy,
       });
-      targetPage.drawText("Qté", { x: 282, y: startY, size: 8, font: bold });
-      targetPage.drawText("PU TTC", { x: 310, y: startY, size: 8, font: bold });
-      targetPage.drawText("Rem.", { x: 372, y: startY, size: 8, font: bold });
-      targetPage.drawText("TVA", { x: 414, y: startY, size: 8, font: bold });
-      targetPage.drawText("Total TTC", {
-        x: 462,
-        y: startY,
-        size: 8,
-        font: bold,
-      });
-
-      targetPage.drawLine({
-        start: { x: 40, y: startY - 8 },
-        end: { x: 555, y: startY - 8 },
-        thickness: 1,
-        color: rgb(0, 0, 0),
-      });
-
-      return startY - 38;
+      const labels = [
+        ["PRODUIT", 52],
+        ["QTE", 320],
+        ["PU TTC", 365],
+        ["REM.", 425],
+        ["TOTAL TTC", 480],
+      ] as const;
+      labels.forEach(([label, x]) =>
+        targetPage.drawText(label, {
+          x,
+          y: startY + 2,
+          size: 7.5,
+          font: bold,
+          color: white,
+        }),
+      );
+      return startY - 40;
     };
 
     const addContinuationPage = () => {
       const targetPage = pdfDoc.addPage([595, 842]);
-      targetPage.drawText("BESANÇON ARCHERIE", {
-        x: 40,
-        y: 790,
-        size: 16,
-        font: bold,
-      });
-      targetPage.drawText(`DEVIS ${quoteNumber} — suite`, {
-        x: 40,
-        y: 765,
-        size: 11,
-        font: bold,
-      });
-      return { targetPage, startY: drawTableHeader(targetPage, 730) };
+      drawHeader(targetPage, true);
+      return { targetPage, startY: drawTableHeader(targetPage, 700) };
     };
 
     let page = pdfDoc.addPage([595, 842]);
-    let y = 790;
+    drawHeader(page);
 
-    page.drawText("BESANÇON ARCHERIE", { x: 50, y, size: 22, font: bold });
-    y -= 30;
-
-    page.drawText(`DEVIS ${quoteNumber}`, { x: 50, y, size: 18, font: bold });
-    page.drawText(`Date : ${new Date().toLocaleDateString("fr-FR")}`, {
-      x: 400,
-      y,
-      size: 10,
-      font,
-    });
-
-    y -= 50;
-
-    page.drawText("Client", { x: 50, y, size: 13, font: bold });
-    y -= 22;
-
-    const customerPdfLines = [
-      clientName,
-      company,
+    const sellerLines = [
+      legalInfo.companyName,
+      [legalInfo.legalForm, legalInfo.shareCapital
+        ? `au capital de ${legalInfo.shareCapital}`
+        : ""].filter(Boolean).join(" "),
+      legalInfo.address1,
+      legalInfo.address2,
+      `${legalInfo.postalCode} ${legalInfo.city}`.trim(),
+      legalInfo.country,
+    ].filter(Boolean);
+    const customerLines = [
+      company || clientName,
+      company && clientName ? clientName : "",
       address1,
       address2,
       `${zip} ${city}`.trim(),
       country,
-      email ? `Email : ${email}` : "",
-      phone ? `Téléphone : ${phone}` : "",
+      email,
+      phone,
     ].filter(Boolean);
 
-    if (customerPdfLines.length === 0) {
-      page.drawText("-", { x: 50, y, size: 11, font });
-      y -= 16;
-    } else {
-      for (const customerLine of customerPdfLines) {
-        page.drawText(customerLine.slice(0, 70), { x: 50, y, size: 10, font });
-        y -= 14;
-      }
-    }
+    const drawInfoCard = (
+      title: string,
+      cardLines: string[],
+      x: number,
+      width: number,
+    ) => {
+      page.drawRectangle({
+        x,
+        y: 590,
+        width,
+        height: 116,
+        color: pale,
+        borderColor: rgb(0.88, 0.89, 0.91),
+        borderWidth: 0.7,
+      });
+      page.drawText(title, { x: x + 14, y: 683, size: 8, font: bold, color: gold });
+      let cardY = 665;
+      cardLines.slice(0, 7).forEach((value, index) => {
+        page.drawText(fitText(value, index === 0 ? bold : font, 8.5, width - 28), {
+          x: x + 14,
+          y: cardY,
+          size: 8.5,
+          font: index === 0 ? bold : font,
+          color: navy,
+        });
+        cardY -= 13;
+      });
+    };
 
-    y -= 28;
-    y = drawTableHeader(page, y);
+    drawInfoCard("EMETTEUR", sellerLines, 40, 247);
+    drawInfoCard("DESTINATAIRE", customerLines, 307, 248);
 
-    for (const line of lines) {
-      if (y < 175) {
+    let y = drawTableHeader(page, 552);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (y < 180) {
         const continuation = addContinuationPage();
         page = continuation.targetPage;
         y = continuation.startY;
       }
 
       const amounts = getLineAmounts(line);
-
-      await drawProductImage(pdfDoc, page, line.imageUrl, 40, y - 8);
-
-      page.drawText(line.title.slice(0, 32), { x: 82, y, size: 8, font });
-
-      if (line.sku) {
-        page.drawText(`SKU : ${line.sku}`.slice(0, 32), {
-          x: 82,
-          y: y - 12,
-          size: 7,
-          font,
-          color: rgb(0.35, 0.35, 0.35),
+      if (index % 2 === 1) {
+        page.drawRectangle({
+          x: 40,
+          y: y - 27,
+          width: 515,
+          height: 43,
+          color: pale,
         });
       }
 
-      page.drawText(String(line.quantity), { x: 284, y, size: 8, font });
-      page.drawText(formatMoney(line.priceTtc), {
-        x: 310,
+      await drawProductImage(pdfDoc, page, line.imageUrl, 48, y - 19);
+      page.drawText(fitText(line.title, bold, 8.5, 215), {
+        x: 90,
         y,
-        size: 8,
-        font,
+        size: 8.5,
+        font: bold,
+        color: navy,
       });
-      page.drawText(`${line.discountPercent}%`, {
-        x: 374,
-        y,
-        size: 8,
-        font,
+      if (line.sku) {
+        page.drawText(fitText(`Réf. ${line.sku}`, font, 7, 215), {
+          x: 90,
+          y: y - 13,
+          size: 7,
+          font,
+          color: grey,
+        });
+      }
+      drawRight(page, String(line.quantity), 342, y - 2, 8, font);
+      drawRight(page, formatMoney(line.priceTtc), 415, y - 2, 8, font);
+      drawRight(page, `${line.discountPercent}%`, 462, y - 2, 8, font);
+      drawRight(page, formatMoney(amounts.ttc), 545, y - 2, 8, bold);
+      page.drawLine({
+        start: { x: 40, y: y - 27 },
+        end: { x: 555, y: y - 27 },
+        thickness: 0.35,
+        color: rgb(0.85, 0.86, 0.88),
       });
-      page.drawText(`${line.vatRate}%`, {
-        x: 416,
-        y,
-        size: 8,
-        font,
-      });
-      page.drawText(formatMoney(amounts.ttc), {
-        x: 462,
-        y,
-        size: 8,
-        font,
-      });
-
-      y -= 45;
+      y -= 43;
     }
 
-    y -= 10;
-
-    if (y < 205) {
+    if (y < 275) {
       page = pdfDoc.addPage([595, 842]);
-      page.drawText("BESANÇON ARCHERIE", {
-        x: 40,
-        y: 790,
-        size: 16,
-        font: bold,
-      });
-      page.drawText(`RÉCAPITULATIF — DEVIS ${quoteNumber}`, {
-        x: 40,
-        y: 765,
-        size: 11,
-        font: bold,
-      });
-      y = 715;
+      drawHeader(page, true);
+      y = 680;
     }
 
-    page.drawText(`Total HT : ${formatMoney(totals.ht)}`, {
-      x: 360,
-      y,
-      size: 11,
-      font,
+    const totalBoxHeight = totals.discount > 0 ? 118 : 96;
+    page.drawRectangle({
+      x: 330,
+      y: y - totalBoxHeight,
+      width: 225,
+      height: totalBoxHeight,
+      color: lightGold,
     });
-    y -= 18;
-
-    page.drawText(`Total TVA : ${formatMoney(totals.vat)}`, {
-      x: 360,
-      y,
-      size: 11,
-      font,
-    });
-    y -= 18;
-
+    let totalY = y - 25;
+    const totalRows: [string, string, boolean][] = [
+      ["Total HT", formatMoney(totals.ht), false],
+      ["TVA", formatMoney(totals.vat), false],
+    ];
     if (totals.discount > 0) {
-      page.drawText(`Remises : -${formatMoney(totals.discount)}`, {
-        x: 360,
-        y,
-        size: 11,
-        font,
-      });
-      y -= 20;
+      totalRows.push(["Remises", `-${formatMoney(totals.discount)}`, false]);
     }
-
-    page.drawText(`Total TTC : ${formatMoney(totals.ttc)}`, {
-      x: 360,
-      y,
-      size: 14,
-      font: bold,
+    totalRows.forEach(([label, value]) => {
+      page.drawText(label, { x: 347, y: totalY, size: 9, font, color: grey });
+      drawRight(page, value, 538, totalY, 9, font, navy);
+      totalY -= 20;
     });
+    page.drawLine({
+      start: { x: 347, y: totalY + 8 },
+      end: { x: 538, y: totalY + 8 },
+      thickness: 1,
+      color: gold,
+    });
+    page.drawText("TOTAL TTC", {
+      x: 347,
+      y: totalY - 8,
+      size: 11,
+      font: bold,
+      color: navy,
+    });
+    drawRight(page, formatMoney(totals.ttc), 538, totalY - 8, 13, bold, navy);
 
     const pages = pdfDoc.getPages();
+    const legalLine = [
+      legalInfo.siren ? `SIREN ${legalInfo.siren}` : "",
+      legalInfo.siret ? `SIRET ${legalInfo.siret}` : "",
+      legalInfo.vatNumber ? `TVA ${legalInfo.vatNumber}` : "",
+    ].filter(Boolean).join("  •  ");
+    const contactLine = [
+      legalInfo.email,
+      legalInfo.phone,
+      legalInfo.website,
+    ].filter(Boolean).join("  •  ");
+
     pages.forEach((pdfPage, index) => {
-      pdfPage.drawLine({
-        start: { x: 40, y: 120 },
-        end: { x: 555, y: 120 },
-        thickness: 1,
-        color: rgb(0.6, 0.6, 0.6),
+      pdfPage.drawRectangle({
+        x: 0,
+        y: 0,
+        width: 595,
+        height: 92,
+        color: navy,
       });
-      pdfPage.drawText("Besançon Archerie - SAS au capital de 5 000 €", {
+      pdfPage.drawText(fitText(legalLine, font, 7.5, 465), {
         x: 40,
-        y: 96,
-        size: 8,
+        y: 60,
+        size: 7.5,
         font,
+        color: white,
       });
-      pdfPage.drawText(
-        "SIREN : 979 490 794 - SIRET : 979 490 794 00018 - TVA : FR81979490794",
-        { x: 40, y: 82, size: 8, font },
+      if (contactLine) {
+        pdfPage.drawText(fitText(contactLine, font, 7.5, 465), {
+          x: 40,
+          y: 45,
+          size: 7.5,
+          font,
+          color: white,
+        });
+      }
+      if (legalInfo.additionalLegal) {
+        const legalLines = wrapText(
+          legalInfo.additionalLegal,
+          font,
+          6.5,
+          465,
+        ).slice(0, 2);
+        legalLines.forEach((value, lineIndex) => {
+          pdfPage.drawText(value, {
+            x: 40,
+            y: 29 - lineIndex * 9,
+            size: 6.5,
+            font,
+            color: rgb(0.76, 0.79, 0.83),
+          });
+        });
+      }
+      drawRight(
+        pdfPage,
+        `${index + 1} / ${pages.length}`,
+        555,
+        45,
+        8,
+        bold,
+        gold,
       );
-      pdfPage.drawText("25 Grande Rue, 25770 Franois", {
-        x: 40,
-        y: 68,
-        size: 8,
-        font,
-      });
-      pdfPage.drawText(`Page ${index + 1}/${pages.length}`, {
-        x: 500,
-        y: 68,
-        size: 8,
-        font,
-      });
     });
 
     const pdfBytes = await pdfDoc.save();
@@ -888,18 +1010,25 @@ export default function QuoteEditor({
 
       <s-section slot="aside" heading="Informations légales">
         <s-paragraph>
-          Besançon Archerie
+          {legalInfo.companyName}
           <br />
-          SAS au capital de 5 000 €
+          {[legalInfo.legalForm, legalInfo.shareCapital
+            ? `au capital de ${legalInfo.shareCapital}`
+            : ""]
+            .filter(Boolean)
+            .join(" ")}
           <br />
-          SIREN : 979 490 794
+          SIREN : {legalInfo.siren || "—"}
           <br />
-          SIRET : 979 490 794 00018
+          SIRET : {legalInfo.siret || "—"}
           <br />
-          TVA : FR81979490794
+          TVA : {legalInfo.vatNumber || "—"}
           <br />
-          25 Grande Rue, 25770 Franois
+          {[legalInfo.address1, legalInfo.address2].filter(Boolean).join(", ")}
+          <br />
+          {[legalInfo.postalCode, legalInfo.city].filter(Boolean).join(" ")}
         </s-paragraph>
+        <s-link href="/app/settings">Modifier mes informations</s-link>
       </s-section>
     </s-page>
   );

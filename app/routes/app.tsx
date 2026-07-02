@@ -20,6 +20,7 @@ export default function App() {
       <s-app-nav>
         <s-link href="/app/quotes">Mes devis</s-link>
         <s-link href="/app/quotes/new">Nouveau devis</s-link>
+        <s-link href="/app/settings">Mes informations</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

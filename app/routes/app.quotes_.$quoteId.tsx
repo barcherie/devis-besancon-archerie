@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import QuoteEditor from "../components/QuoteEditor";
 import db from "../db.server";
+import { getShopSettings } from "../shop-settings.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -24,6 +25,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   return {
+    legalInfo: await getShopSettings(session.shop),
     initialQuote: {
       id: quote.id,
       number: quote.number,
@@ -54,8 +56,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export default function EditQuotePage() {
-  const { initialQuote } = useLoaderData<typeof loader>();
-  return <QuoteEditor initialQuote={initialQuote} />;
+  const { initialQuote, legalInfo } = useLoaderData<typeof loader>();
+  return <QuoteEditor initialQuote={initialQuote} legalInfo={legalInfo} />;
 }
 
 export function ErrorBoundary() {

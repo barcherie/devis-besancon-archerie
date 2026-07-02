@@ -48,6 +48,27 @@ model QuoteCounter {
   @@id([shop, year])
 }
 
+model ShopSettings {
+  shop            String   @id
+  companyName     String   @default("Besançon Archerie")
+  legalForm       String   @default("SAS")
+  shareCapital    String   @default("5 000 €")
+  siren           String   @default("979 490 794")
+  siret           String   @default("979 490 794 00018")
+  vatNumber       String   @default("FR81979490794")
+  address1        String   @default("25 Grande Rue")
+  address2        String   @default("")
+  postalCode      String   @default("25770")
+  city            String   @default("Franois")
+  country         String   @default("France")
+  email           String   @default("")
+  phone           String   @default("")
+  website         String   @default("")
+  additionalLegal String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Quote {
   id                  String      @id @default(cuid())
   shop                String
