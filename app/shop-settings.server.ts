@@ -16,6 +16,8 @@ export const defaultShopSettings = {
   phone: "",
   website: "",
   additionalLegal: "",
+  bankTransferInfo:
+    "Informations en cas de virement :\nIBAN : FR76 1080 7000 3312 5212 1202 213\nBIC : CCBPFRPPDJN",
 };
 
 export type LegalInfo = typeof defaultShopSettings;
@@ -40,5 +42,6 @@ export async function getShopSettings(shop: string): Promise<LegalInfo> {
     phone: settings.phone,
     website: settings.website,
     additionalLegal: settings.additionalLegal,
+    bankTransferInfo: settings.bankTransferInfo,
   };
 }

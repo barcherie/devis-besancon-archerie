@@ -172,6 +172,12 @@ export default function QuotesPage() {
                   >
                     Modifier
                   </s-button>
+                  <s-button
+                    href={`/app/quotes/${quote.id}?download=pdf`}
+                    disabled={processingId === quote.id}
+                  >
+                    Générer le PDF
+                  </s-button>
                   {quote.shopifyOrderId ? (
                     <s-button
                       variant="primary"

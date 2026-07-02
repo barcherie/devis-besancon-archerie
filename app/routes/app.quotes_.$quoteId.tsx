@@ -26,6 +26,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return {
     legalInfo: await getShopSettings(session.shop),
+    autoGeneratePdf:
+      new URL(request.url).searchParams.get("download") === "pdf",
     initialQuote: {
       id: quote.id,
       number: quote.number,
@@ -56,8 +58,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export default function EditQuotePage() {
-  const { initialQuote, legalInfo } = useLoaderData<typeof loader>();
-  return <QuoteEditor initialQuote={initialQuote} legalInfo={legalInfo} />;
+  const { initialQuote, legalInfo, autoGeneratePdf } =
+    useLoaderData<typeof loader>();
+  return (
+    <QuoteEditor
+      initialQuote={initialQuote}
+      legalInfo={legalInfo}
+      autoGeneratePdf={autoGeneratePdf}
+    />
+  );
 }
 
 export function ErrorBoundary() {

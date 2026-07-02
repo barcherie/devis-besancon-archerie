@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PDFDocument,
   PDFFont,
@@ -160,11 +160,14 @@ async function drawProductImage(
 export default function QuoteEditor({
   initialQuote,
   legalInfo,
+  autoGeneratePdf = false,
 }: {
   initialQuote?: InitialQuote;
   legalInfo: LegalInfo;
+  autoGeneratePdf?: boolean;
 }) {
   const shopify = useAppBridge();
+  const autoGenerationStarted = useRef(false);
 
   const [customerQuery, setCustomerQuery] = useState(
     initialQuote?.customerName || "",
@@ -622,7 +625,7 @@ export default function QuoteEditor({
       y -= 43;
     }
 
-    if (y < 275) {
+    if (y < 390) {
       page = pdfDoc.addPage([595, 842]);
       drawHeader(page, true);
       y = 680;
@@ -663,6 +666,35 @@ export default function QuoteEditor({
       color: navy,
     });
     drawRight(page, formatMoney(totals.ttc), 538, totalY - 8, 13, bold, navy);
+
+    if (legalInfo.bankTransferInfo) {
+      const bankLines = wrapText(
+        legalInfo.bankTransferInfo,
+        font,
+        7.5,
+        191,
+      ).slice(0, 5);
+      const bankHeight = Math.max(58, 24 + bankLines.length * 11);
+      const bankTop = y - totalBoxHeight - 10;
+      page.drawRectangle({
+        x: 330,
+        y: bankTop - bankHeight,
+        width: 225,
+        height: bankHeight,
+        color: pale,
+        borderColor: rgb(0.84, 0.85, 0.87),
+        borderWidth: 0.6,
+      });
+      bankLines.forEach((value, index) => {
+        page.drawText(value, {
+          x: 347,
+          y: bankTop - 20 - index * 11,
+          size: 7.5,
+          font: index === 0 ? bold : font,
+          color: index === 0 ? navy : grey,
+        });
+      });
+    }
 
     const pages = pdfDoc.getPages();
     const legalLine = [
@@ -749,6 +781,14 @@ export default function QuoteEditor({
     URL.revokeObjectURL(url);
     shopify.toast.show(`Devis ${quoteNumber} généré`);
   };
+
+  useEffect(() => {
+    if (!autoGeneratePdf || autoGenerationStarted.current) return;
+    autoGenerationStarted.current = true;
+    void generatePdf();
+    // Le téléchargement automatique ne doit être déclenché qu'une fois.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGeneratePdf]);
 
   return (
     <s-page

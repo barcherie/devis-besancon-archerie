@@ -42,7 +42,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     settingKeys.map((key) => [
       key,
       typeof body[key] === "string"
-        ? body[key].trim().slice(0, key === "additionalLegal" ? 1000 : 200)
+        ? body[key]
+            .trim()
+            .slice(
+              0,
+              key === "additionalLegal" || key === "bankTransferInfo"
+                ? 1000
+                : 200,
+            )
         : "",
     ]),
   ) as LegalInfo;
@@ -205,14 +212,24 @@ export default function SettingsPage() {
       </s-section>
 
       <s-section heading="Mentions complémentaires">
-        <s-text-area
-          label="Texte affiché en bas du devis"
-          value={settings.additionalLegal}
-          rows={4}
-          onInput={(event) =>
-            update("additionalLegal", event.currentTarget.value)
-          }
-        />
+        <s-stack gap="base">
+          <s-text-area
+            label="Informations en cas de virement"
+            value={settings.bankTransferInfo}
+            rows={4}
+            onInput={(event) =>
+              update("bankTransferInfo", event.currentTarget.value)
+            }
+          />
+          <s-text-area
+            label="Texte affiché en bas du devis"
+            value={settings.additionalLegal}
+            rows={4}
+            onInput={(event) =>
+              update("additionalLegal", event.currentTarget.value)
+            }
+          />
+        </s-stack>
       </s-section>
     </s-page>
   );
