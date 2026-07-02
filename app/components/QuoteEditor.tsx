@@ -10,7 +10,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { LegalInfo } from "../shop-settings.server";
 
-const APP_VERSION = "V1.12";
+const APP_VERSION = "V1.13";
 
 export type QuoteLine = {
   id: string;
@@ -672,23 +672,21 @@ export default function QuoteEditor({
         legalInfo.bankTransferInfo,
         font,
         7.5,
-        191,
-      ).slice(0, 5);
-      const bankHeight = Math.max(58, 24 + bankLines.length * 11);
-      const bankTop = y - totalBoxHeight - 10;
+        236,
+      ).slice(0, 7);
       page.drawRectangle({
-        x: 330,
-        y: bankTop - bankHeight,
-        width: 225,
-        height: bankHeight,
+        x: 40,
+        y: y - totalBoxHeight,
+        width: 270,
+        height: totalBoxHeight,
         color: pale,
         borderColor: rgb(0.84, 0.85, 0.87),
         borderWidth: 0.6,
       });
       bankLines.forEach((value, index) => {
         page.drawText(value, {
-          x: 347,
-          y: bankTop - 20 - index * 11,
+          x: 57,
+          y: y - 25 - index * 11,
           size: 7.5,
           font: index === 0 ? bold : font,
           color: index === 0 ? navy : grey,

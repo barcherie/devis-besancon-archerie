@@ -12,7 +12,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     await db.$queryRaw`SELECT 1`;
-    return new Response("OK devis-pdf-v1.12", {
+    return new Response("OK devis-pdf-v1.13", {
       status: 200,
       headers: { "Cache-Control": "no-store" },
     });
