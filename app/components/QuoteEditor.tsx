@@ -491,10 +491,12 @@ export default function QuoteEditor({
       });
       const labels = [
         ["PRODUIT", 52],
-        ["QTE", 320],
-        ["PU TTC", 365],
-        ["REM.", 425],
-        ["TOTAL TTC", 480],
+        ["QTE", 278],
+        ["PU HT", 310],
+        ["PU TTC", 355],
+        ["REM.", 411],
+        ["TOTAL HT", 445],
+        ["TOTAL TTC", 500],
       ] as const;
       labels.forEach(([label, x]) =>
         targetPage.drawText(label, {
@@ -519,9 +521,6 @@ export default function QuoteEditor({
 
     const sellerLines = [
       legalInfo.companyName,
-      [legalInfo.legalForm, legalInfo.shareCapital
-        ? `au capital de ${legalInfo.shareCapital}`
-        : ""].filter(Boolean).join(" "),
       legalInfo.address1,
       legalInfo.address2,
       `${legalInfo.postalCode} ${legalInfo.city}`.trim(),
@@ -580,6 +579,7 @@ export default function QuoteEditor({
       }
 
       const amounts = getLineAmounts(line);
+      const unitPriceHt = line.priceTtc / (1 + line.vatRate / 100);
       if (index % 2 === 1) {
         page.drawRectangle({
           x: 40,
@@ -591,7 +591,7 @@ export default function QuoteEditor({
       }
 
       await drawProductImage(pdfDoc, page, line.imageUrl, 48, y - 19);
-      page.drawText(fitText(line.title, bold, 8.5, 215), {
+      page.drawText(fitText(line.title, bold, 8.5, 170), {
         x: 90,
         y,
         size: 8.5,
@@ -599,7 +599,7 @@ export default function QuoteEditor({
         color: navy,
       });
       if (line.sku) {
-        page.drawText(fitText(`Réf. ${line.sku}`, font, 7, 215), {
+        page.drawText(fitText(`Réf. ${line.sku}`, font, 7, 170), {
           x: 90,
           y: y - 13,
           size: 7,
@@ -607,10 +607,12 @@ export default function QuoteEditor({
           color: grey,
         });
       }
-      drawRight(page, String(line.quantity), 342, y - 2, 8, font);
-      drawRight(page, formatMoney(line.priceTtc), 415, y - 2, 8, font);
-      drawRight(page, `${line.discountPercent}%`, 462, y - 2, 8, font);
-      drawRight(page, formatMoney(amounts.ttc), 545, y - 2, 8, bold);
+      drawRight(page, String(line.quantity), 302, y - 2, 7.5, font);
+      drawRight(page, formatMoney(unitPriceHt), 352, y - 2, 7.5, font);
+      drawRight(page, formatMoney(line.priceTtc), 405, y - 2, 7.5, font);
+      drawRight(page, `${line.discountPercent}%`, 441, y - 2, 7.5, font);
+      drawRight(page, formatMoney(amounts.ht), 497, y - 2, 7.5, font);
+      drawRight(page, formatMoney(amounts.ttc), 545, y - 2, 7.5, bold);
       page.drawLine({
         start: { x: 40, y: y - 27 },
         end: { x: 555, y: y - 27 },
@@ -664,6 +666,9 @@ export default function QuoteEditor({
 
     const pages = pdfDoc.getPages();
     const legalLine = [
+      [legalInfo.legalForm, legalInfo.shareCapital
+        ? `au capital de ${legalInfo.shareCapital}`
+        : ""].filter(Boolean).join(" "),
       legalInfo.siren ? `SIREN ${legalInfo.siren}` : "",
       legalInfo.siret ? `SIRET ${legalInfo.siret}` : "",
       legalInfo.vatNumber ? `TVA ${legalInfo.vatNumber}` : "",

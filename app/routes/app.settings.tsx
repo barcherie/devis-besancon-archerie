@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -17,6 +17,11 @@ import {
 import { authenticate } from "../shopify.server";
 
 const settingKeys = Object.keys(defaultShopSettings) as (keyof LegalInfo)[];
+
+type ActionData = {
+  saved?: boolean;
+  error?: string;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -61,37 +66,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function SettingsPage() {
   const { settings: initialSettings } = useLoaderData<typeof loader>();
   const shopify = useAppBridge();
+  const fetcher = useFetcher<typeof action>();
   const [settings, setSettings] = useState<LegalInfo>(initialSettings);
-  const [isSaving, setIsSaving] = useState(false);
+  const wasSubmitting = useRef(false);
+  const isSaving = fetcher.state !== "idle";
 
   const update = (key: keyof LegalInfo, value: string) => {
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
-  const save = async () => {
-    setIsSaving(true);
-    try {
-      const response = await fetch("/app/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      const result = (await response.json()) as {
-        saved?: boolean;
-        error?: string;
-      };
-      if (!response.ok || !result.saved) {
-        throw new Error(result.error || "Enregistrement impossible");
-      }
-      shopify.toast.show("Informations enregistrées");
-    } catch (error) {
-      shopify.toast.show(
-        error instanceof Error ? error.message : "Enregistrement impossible",
-        { isError: true },
-      );
-    } finally {
-      setIsSaving(false);
+  useEffect(() => {
+    if (fetcher.state !== "idle") {
+      wasSubmitting.current = true;
+      return;
     }
+
+    if (!wasSubmitting.current) return;
+    wasSubmitting.current = false;
+
+    const result = fetcher.data as ActionData | undefined;
+    if (result?.saved) {
+      shopify.toast.show("Informations enregistrées");
+    } else {
+      const message = result?.error || "Enregistrement impossible";
+      shopify.toast.show(message, { isError: true });
+    }
+  }, [fetcher.data, fetcher.state, shopify]);
+
+  const save = () => {
+    void fetcher.submit(settings, {
+      method: "POST",
+      encType: "application/json",
+      action: "/app/settings",
+    });
   };
 
   return (
