@@ -4,6 +4,7 @@ import db from "../db.server";
 import { authenticate } from "../shopify.server";
 
 type QuoteLineInput = {
+  variantId?: string;
   title: string;
   sku: string;
   quantity: number;
@@ -71,6 +72,7 @@ function parseQuoteInput(value: unknown): QuoteInput | null {
     }
 
     lines.push({
+      variantId: optionalString(item.variantId, 200) || undefined,
       title,
       sku: optionalString(item.sku, 200),
       quantity,
@@ -150,6 +152,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     lines: {
       create: input.lines.map((line, position) => ({
         position,
+        shopifyVariantId: line.variantId,
         title: line.title,
         sku: line.sku || null,
         quantity: line.quantity,
@@ -168,11 +171,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const existingQuote = await db.quote.findFirst({
       where: { id: input.id, shop: session.shop },
-      select: { id: true },
+      select: { id: true, shopifyOrderId: true },
     });
 
     if (!existingQuote) {
       return Response.json({ error: "Devis introuvable" }, { status: 404 });
+    }
+
+    if (existingQuote.shopifyOrderId) {
+      return Response.json(
+        { error: "Une commande Shopify a déjà été créée pour ce devis" },
+        { status: 409 },
+      );
     }
 
     const quote = await db.$transaction(async (transaction) => {
