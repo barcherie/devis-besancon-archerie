@@ -158,19 +158,28 @@ export default function QuotesPage() {
                 </s-paragraph>
                 <s-heading>{formatMoney(quote.totalTtc)} TTC</s-heading>
 
-                {quote.shopifyOrderId ? (
+                {quote.shopifyOrderId && (
                   <s-paragraph>
-                    Commande Shopify créée :{" "}
+                    Commande Shopify :{" "}
                     {quote.shopifyOrderName || quote.shopifyOrderId}
                   </s-paragraph>
-                ) : (
-                  <s-stack direction="inline" gap="small">
+                )}
+
+                <s-stack direction="inline" gap="small">
+                  <s-button
+                    href={`/app/quotes/${quote.id}`}
+                    disabled={processingId === quote.id}
+                  >
+                    Modifier
+                  </s-button>
+                  {quote.shopifyOrderId ? (
                     <s-button
-                      href={`/app/quotes/${quote.id}`}
-                      disabled={processingId === quote.id}
+                      variant="primary"
+                      href={`shopify://admin/orders/${quote.shopifyOrderId.split("/").pop()}`}
                     >
-                      Modifier
+                      Voir la commande
                     </s-button>
+                  ) : (
                     <s-button
                       variant="primary"
                       disabled={processingId === quote.id}
@@ -180,15 +189,15 @@ export default function QuotesPage() {
                     >
                       Valider et créer la commande
                     </s-button>
-                    <s-button
-                      tone="critical"
-                      disabled={processingId === quote.id}
-                      onClick={() => void deleteQuote(quote.id, quote.number)}
-                    >
-                      Supprimer
-                    </s-button>
-                  </s-stack>
-                )}
+                  )}
+                  <s-button
+                    tone="critical"
+                    disabled={processingId === quote.id}
+                    onClick={() => void deleteQuote(quote.id, quote.number)}
+                  >
+                    Supprimer
+                  </s-button>
+                </s-stack>
               </s-stack>
             </s-section>
           ))}

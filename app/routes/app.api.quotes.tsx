@@ -171,18 +171,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const existingQuote = await db.quote.findFirst({
       where: { id: input.id, shop: session.shop },
-      select: { id: true, shopifyOrderId: true },
+      select: { id: true },
     });
 
     if (!existingQuote) {
       return Response.json({ error: "Devis introuvable" }, { status: 404 });
-    }
-
-    if (existingQuote.shopifyOrderId) {
-      return Response.json(
-        { error: "Une commande Shopify a déjà été créée pour ce devis" },
-        { status: 409 },
-      );
     }
 
     const quote = await db.$transaction(async (transaction) => {

@@ -29,8 +29,34 @@ type DraftOrderCompleteResponse = {
   };
 };
 
+type DraftOrderResponse = {
+  data?: {
+    draftOrder?: {
+      id: string;
+      order?: { id: string; name: string } | null;
+    } | null;
+  };
+};
+
 function firstError(errors: ShopifyUserError[] | undefined) {
   return errors?.[0]?.message;
+}
+
+async function saveConvertedOrder(
+  quoteId: string,
+  draftOrderId: string,
+  order: { id: string; name: string },
+) {
+  await db.quote.update({
+    where: { id: quoteId },
+    data: {
+      status: "ACCEPTED",
+      shopifyDraftOrderId: draftOrderId,
+      shopifyOrderId: order.id,
+      shopifyOrderName: order.name,
+      convertedAt: new Date(),
+    },
+  });
 }
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -51,13 +77,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   if (request.method === "DELETE") {
-    if (quote.shopifyOrderId) {
-      return Response.json(
-        { error: "Un devis converti en commande ne peut plus être supprimé" },
-        { status: 409 },
-      );
-    }
-
     await db.quote.delete({ where: { id: quote.id } });
     return Response.json({ deleted: true });
   }
@@ -91,6 +110,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   try {
     let draftOrderId = quote.shopifyDraftOrderId;
+
+    // Une tentative précédente peut avoir créé la commande sans avoir pu
+    // enregistrer son numéro, faute du scope read_orders.
+    if (draftOrderId) {
+      const existingResponse = await admin.graphql(
+        `#graphql
+          query getConvertedQuoteOrder($id: ID!) {
+            draftOrder(id: $id) {
+              id
+              order {
+                id
+                name
+              }
+            }
+          }
+        `,
+        { variables: { id: draftOrderId } },
+      );
+      const existingJson =
+        (await existingResponse.json()) as DraftOrderResponse;
+      const existingOrder = existingJson.data?.draftOrder?.order;
+
+      if (existingOrder) {
+        await saveConvertedOrder(quote.id, draftOrderId, existingOrder);
+        return Response.json({ order: existingOrder });
+      }
+    }
 
     if (!draftOrderId) {
       const lineItems = quote.lines.map((line) => {
@@ -230,16 +276,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       );
     }
 
-    await db.quote.update({
-      where: { id: quote.id },
-      data: {
-        status: "ACCEPTED",
-        shopifyDraftOrderId: draftOrderId,
-        shopifyOrderId: order.id,
-        shopifyOrderName: order.name,
-        convertedAt: new Date(),
-      },
-    });
+    await saveConvertedOrder(quote.id, draftOrderId, order);
 
     return Response.json({ order });
   } catch (error) {

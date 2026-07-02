@@ -13,7 +13,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: {
       id: params.quoteId,
       shop: session.shop,
-      shopifyOrderId: null,
     },
     include: {
       lines: { orderBy: { position: "asc" } },
@@ -21,7 +20,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   if (!quote) {
-    throw new Response("Devis introuvable ou déjà converti", { status: 404 });
+    throw new Response("Devis introuvable", { status: 404 });
   }
 
   return {
