@@ -10,7 +10,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return null;
 };
 
-const APP_VERSION = "V1.7";
+const APP_VERSION = "V1.8";
 
 type QuoteLine = {
   id: string;
@@ -18,6 +18,8 @@ type QuoteLine = {
   sku: string;
   quantity: number;
   priceTtc: number;
+  vatRate: number;
+  discountPercent: number;
   imageUrl: string;
 };
 
@@ -58,12 +60,14 @@ function formatMoney(value: number) {
   return `${value.toFixed(2).replace(".", ",")} €`;
 }
 
-function getVatFromTtc(ttc: number, rate = 20) {
-  const ht = ttc / (1 + rate / 100);
+function getLineAmounts(line: QuoteLine) {
+  const grossTtc = line.priceTtc * line.quantity;
+  const discount = grossTtc * (line.discountPercent / 100);
+  const ttc = grossTtc - discount;
+  const ht = ttc / (1 + line.vatRate / 100);
   const vat = ttc - ht;
-  return { ht, vat, ttc };
+  return { grossTtc, discount, ht, vat, ttc };
 }
-
 
 function generateQuoteNumber() {
   const now = new Date();
@@ -181,11 +185,13 @@ export default function Index() {
 
       if (variants.length === 0) {
         newLines.push({
-          id: product.id,
+          id: `${product.id}-${crypto.randomUUID()}`,
           title: productTitle,
           sku: "",
           quantity: 1,
           priceTtc: 0,
+          vatRate: 20,
+          discountPercent: 0,
           imageUrl,
         });
         return;
@@ -193,7 +199,7 @@ export default function Index() {
 
       variants.forEach((variant) => {
         newLines.push({
-          id: variant.id,
+          id: `${variant.id}-${crypto.randomUUID()}`,
           title:
             variant.title && variant.title !== "Default Title"
               ? `${productTitle} - ${variant.title}`
@@ -201,6 +207,8 @@ export default function Index() {
           sku: variant.sku || "",
           quantity: 1,
           priceTtc: Number(variant.price || 0),
+          vatRate: 20,
+          discountPercent: 0,
           imageUrl,
         });
       });
@@ -209,12 +217,22 @@ export default function Index() {
     setLines((current) => [...current, ...newLines]);
   };
 
-  const updateQuantity = (id: string, quantity: number) => {
+  const updateLineNumber = (
+    id: string,
+    field: "quantity" | "priceTtc" | "vatRate" | "discountPercent",
+    value: number,
+  ) => {
+    if (!Number.isFinite(value)) return;
+
+    let normalizedValue = Math.max(0, value);
+    if (field === "quantity") normalizedValue = Math.max(1, value);
+    if (field === "vatRate" || field === "discountPercent") {
+      normalizedValue = Math.min(100, normalizedValue);
+    }
+
     setLines((current) =>
       current.map((line) =>
-        line.id === id
-          ? { ...line, quantity: Math.max(1, quantity || 1) }
-          : line,
+        line.id === id ? { ...line, [field]: normalizedValue } : line,
       ),
     );
   };
@@ -225,27 +243,86 @@ export default function Index() {
 
   const totals = lines.reduce(
     (acc, line) => {
-      const lineTtc = line.priceTtc * line.quantity;
-      const amounts = getVatFromTtc(lineTtc);
+      const amounts = getLineAmounts(line);
 
       acc.ht += amounts.ht;
       acc.vat += amounts.vat;
       acc.ttc += amounts.ttc;
+      acc.discount += amounts.discount;
 
       return acc;
     },
-    { ht: 0, vat: 0, ttc: 0 },
+    { ht: 0, vat: 0, ttc: 0, discount: 0 },
   );
 
   const generatePdf = async () => {
+    if (!clientName.trim()) {
+      shopify.toast.show("Sélectionne ou renseigne un client", {
+        isError: true,
+      });
+      return;
+    }
+
+    if (lines.length === 0) {
+      shopify.toast.show("Ajoute au moins un produit au devis", {
+        isError: true,
+      });
+      return;
+    }
+
     const quoteNumber = generateQuoteNumber();
 
     const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([595, 842]);
-
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
+    const drawTableHeader = (targetPage: PDFPage, startY: number) => {
+      targetPage.drawText("Image", { x: 40, y: startY, size: 8, font: bold });
+      targetPage.drawText("Désignation", {
+        x: 82,
+        y: startY,
+        size: 8,
+        font: bold,
+      });
+      targetPage.drawText("Qté", { x: 282, y: startY, size: 8, font: bold });
+      targetPage.drawText("PU TTC", { x: 310, y: startY, size: 8, font: bold });
+      targetPage.drawText("Rem.", { x: 372, y: startY, size: 8, font: bold });
+      targetPage.drawText("TVA", { x: 414, y: startY, size: 8, font: bold });
+      targetPage.drawText("Total TTC", {
+        x: 462,
+        y: startY,
+        size: 8,
+        font: bold,
+      });
+
+      targetPage.drawLine({
+        start: { x: 40, y: startY - 8 },
+        end: { x: 555, y: startY - 8 },
+        thickness: 1,
+        color: rgb(0, 0, 0),
+      });
+
+      return startY - 38;
+    };
+
+    const addContinuationPage = () => {
+      const targetPage = pdfDoc.addPage([595, 842]);
+      targetPage.drawText("BESANÇON ARCHERIE", {
+        x: 40,
+        y: 790,
+        size: 16,
+        font: bold,
+      });
+      targetPage.drawText(`DEVIS ${quoteNumber} — suite`, {
+        x: 40,
+        y: 765,
+        size: 11,
+        font: bold,
+      });
+      return { targetPage, startY: drawTableHeader(targetPage, 730) };
+    };
+
+    let page = pdfDoc.addPage([595, 842]);
     let y = 790;
 
     page.drawText("BESANÇON ARCHERIE", { x: 50, y, size: 22, font: bold });
@@ -286,32 +363,24 @@ export default function Index() {
     }
 
     y -= 28;
-
-    page.drawText("Image", { x: 50, y, size: 10, font: bold });
-    page.drawText("Désignation", { x: 95, y, size: 10, font: bold });
-    page.drawText("Qté", { x: 300, y, size: 10, font: bold });
-    page.drawText("PU TTC", { x: 345, y, size: 10, font: bold });
-    page.drawText("Total TTC", { x: 455, y, size: 10, font: bold });
-
-    y -= 8;
-
-    page.drawLine({
-      start: { x: 50, y },
-      end: { x: 545, y },
-      thickness: 1,
-      color: rgb(0, 0, 0),
-    });
-
-    y -= 38;
+    y = drawTableHeader(page, y);
 
     for (const line of lines) {
-      await drawProductImage(pdfDoc, page, line.imageUrl, 50, y - 8);
+      if (y < 175) {
+        const continuation = addContinuationPage();
+        page = continuation.targetPage;
+        y = continuation.startY;
+      }
 
-      page.drawText(line.title.slice(0, 34), { x: 95, y, size: 9, font });
+      const amounts = getLineAmounts(line);
+
+      await drawProductImage(pdfDoc, page, line.imageUrl, 40, y - 8);
+
+      page.drawText(line.title.slice(0, 32), { x: 82, y, size: 8, font });
 
       if (line.sku) {
-        page.drawText(`SKU : ${line.sku}`.slice(0, 34), {
-          x: 95,
+        page.drawText(`SKU : ${line.sku}`.slice(0, 32), {
+          x: 82,
           y: y - 12,
           size: 7,
           font,
@@ -319,19 +388,53 @@ export default function Index() {
         });
       }
 
-      page.drawText(String(line.quantity), { x: 305, y, size: 9, font });
-      page.drawText(formatMoney(line.priceTtc), { x: 345, y, size: 9, font });
-      page.drawText(formatMoney(line.priceTtc * line.quantity), {
-        x: 455,
+      page.drawText(String(line.quantity), { x: 284, y, size: 8, font });
+      page.drawText(formatMoney(line.priceTtc), {
+        x: 310,
         y,
-        size: 9,
+        size: 8,
+        font,
+      });
+      page.drawText(`${line.discountPercent}%`, {
+        x: 374,
+        y,
+        size: 8,
+        font,
+      });
+      page.drawText(`${line.vatRate}%`, {
+        x: 416,
+        y,
+        size: 8,
+        font,
+      });
+      page.drawText(formatMoney(amounts.ttc), {
+        x: 462,
+        y,
+        size: 8,
         font,
       });
 
       y -= 45;
     }
 
-    y -= 20;
+    y -= 10;
+
+    if (y < 205) {
+      page = pdfDoc.addPage([595, 842]);
+      page.drawText("BESANÇON ARCHERIE", {
+        x: 40,
+        y: 790,
+        size: 16,
+        font: bold,
+      });
+      page.drawText(`RÉCAPITULATIF — DEVIS ${quoteNumber}`, {
+        x: 40,
+        y: 765,
+        size: 11,
+        font: bold,
+      });
+      y = 715;
+    }
 
     page.drawText(`Total HT : ${formatMoney(totals.ht)}`, {
       x: 360,
@@ -341,13 +444,23 @@ export default function Index() {
     });
     y -= 18;
 
-    page.drawText(`TVA 20% : ${formatMoney(totals.vat)}`, {
+    page.drawText(`Total TVA : ${formatMoney(totals.vat)}`, {
       x: 360,
       y,
       size: 11,
       font,
     });
-    y -= 20;
+    y -= 18;
+
+    if (totals.discount > 0) {
+      page.drawText(`Remises : -${formatMoney(totals.discount)}`, {
+        x: 360,
+        y,
+        size: 11,
+        font,
+      });
+      y -= 20;
+    }
 
     page.drawText(`Total TTC : ${formatMoney(totals.ttc)}`, {
       x: 360,
@@ -356,38 +469,36 @@ export default function Index() {
       font: bold,
     });
 
-    y = 120;
-
-    page.drawLine({
-      start: { x: 50, y },
-      end: { x: 545, y },
-      thickness: 1,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-
-    y -= 25;
-
-    page.drawText("Besançon Archerie - SAS au capital de 5 000 €", {
-      x: 50,
-      y,
-      size: 9,
-      font,
-    });
-
-    y -= 14;
-
-    page.drawText(
-      "SIREN : 979 490 794 - SIRET : 979 490 794 00018 - TVA : FR81979490794",
-      { x: 50, y, size: 9, font },
-    );
-
-    y -= 14;
-
-    page.drawText("25 Grande Rue, 25770 Franois", {
-      x: 50,
-      y,
-      size: 9,
-      font,
+    const pages = pdfDoc.getPages();
+    pages.forEach((pdfPage, index) => {
+      pdfPage.drawLine({
+        start: { x: 40, y: 120 },
+        end: { x: 555, y: 120 },
+        thickness: 1,
+        color: rgb(0.6, 0.6, 0.6),
+      });
+      pdfPage.drawText("Besançon Archerie - SAS au capital de 5 000 €", {
+        x: 40,
+        y: 96,
+        size: 8,
+        font,
+      });
+      pdfPage.drawText(
+        "SIREN : 979 490 794 - SIRET : 979 490 794 00018 - TVA : FR81979490794",
+        { x: 40, y: 82, size: 8, font },
+      );
+      pdfPage.drawText("25 Grande Rue, 25770 Franois", {
+        x: 40,
+        y: 68,
+        size: 8,
+        font,
+      });
+      pdfPage.drawText(`Page ${index + 1}/${pages.length}`, {
+        x: 500,
+        y: 68,
+        size: 8,
+        font,
+      });
     });
 
     const pdfBytes = await pdfDoc.save();
@@ -406,6 +517,7 @@ export default function Index() {
     link.click();
 
     URL.revokeObjectURL(url);
+    shopify.toast.show(`Devis ${quoteNumber} généré`);
   };
 
   return (
@@ -518,8 +630,7 @@ export default function Index() {
           )}
 
           {lines.map((line) => {
-            const lineTotal = line.priceTtc * line.quantity;
-            const amounts = getVatFromTtc(lineTotal);
+            const amounts = getLineAmounts(line);
 
             return (
               <s-box
@@ -547,20 +658,71 @@ export default function Index() {
                   {line.sku && <s-text>SKU : {line.sku}</s-text>}
 
                   <s-stack direction="inline" gap="base">
-                    <s-text-field
+                    <s-number-field
                       label="Quantité"
+                      min={1}
+                      step={1}
                       value={String(line.quantity)}
                       onInput={(event) =>
-                        updateQuantity(
+                        updateLineNumber(
                           line.id,
+                          "quantity",
                           Number(event.currentTarget.value),
                         )
                       }
                     />
 
-                    <s-text>PU TTC : {formatMoney(line.priceTtc)}</s-text>
+                    <s-number-field
+                      label="Prix unitaire TTC"
+                      min={0}
+                      step={0.01}
+                      value={String(line.priceTtc)}
+                      onInput={(event) =>
+                        updateLineNumber(
+                          line.id,
+                          "priceTtc",
+                          Number(event.currentTarget.value),
+                        )
+                      }
+                    />
+
+                    <s-number-field
+                      label="TVA (%)"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={String(line.vatRate)}
+                      onInput={(event) =>
+                        updateLineNumber(
+                          line.id,
+                          "vatRate",
+                          Number(event.currentTarget.value),
+                        )
+                      }
+                    />
+
+                    <s-number-field
+                      label="Remise (%)"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={String(line.discountPercent)}
+                      onInput={(event) =>
+                        updateLineNumber(
+                          line.id,
+                          "discountPercent",
+                          Number(event.currentTarget.value),
+                        )
+                      }
+                    />
+
                     <s-text>HT : {formatMoney(amounts.ht)}</s-text>
                     <s-text>TVA : {formatMoney(amounts.vat)}</s-text>
+                    {amounts.discount > 0 && (
+                      <s-text>
+                        Remise : -{formatMoney(amounts.discount)}
+                      </s-text>
+                    )}
                     <s-text>Total TTC : {formatMoney(amounts.ttc)}</s-text>
 
                     <s-button
@@ -580,7 +742,12 @@ export default function Index() {
 
       <s-section slot="aside" heading="Totaux">
         <s-paragraph>Total HT : {formatMoney(totals.ht)}</s-paragraph>
-        <s-paragraph>TVA 20% : {formatMoney(totals.vat)}</s-paragraph>
+        <s-paragraph>Total TVA : {formatMoney(totals.vat)}</s-paragraph>
+        {totals.discount > 0 && (
+          <s-paragraph>
+            Remises appliquées : -{formatMoney(totals.discount)}
+          </s-paragraph>
+        )}
         <s-paragraph>Total TTC : {formatMoney(totals.ttc)}</s-paragraph>
       </s-section>
 
