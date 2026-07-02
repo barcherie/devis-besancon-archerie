@@ -10,7 +10,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return null;
 };
 
-const APP_VERSION = "V1.8";
+const APP_VERSION = "V1.9";
 
 type QuoteLine = {
   id: string;
@@ -21,6 +21,11 @@ type QuoteLine = {
   vatRate: number;
   discountPercent: number;
   imageUrl: string;
+};
+
+type SavedQuote = {
+  id: string;
+  number: string;
 };
 
 type CustomerResult = {
@@ -67,12 +72,6 @@ function getLineAmounts(line: QuoteLine) {
   const ht = ttc / (1 + line.vatRate / 100);
   const vat = ttc - ht;
   return { grossTtc, discount, ht, vat, ttc };
-}
-
-function generateQuoteNumber() {
-  const now = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(now.getDate())}${pad(now.getMonth() + 1)}${now.getFullYear()}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
 function getProductImage(product: PickerProduct) {
@@ -128,6 +127,8 @@ export default function Index() {
   const [phone, setPhone] = useState("");
 
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const searchCustomers = async (value: string) => {
     setCustomerQuery(value);
@@ -255,22 +256,73 @@ export default function Index() {
     { ht: 0, vat: 0, ttc: 0, discount: 0 },
   );
 
-  const generatePdf = async () => {
+  const saveQuote = async (showSuccessToast = true) => {
     if (!clientName.trim()) {
       shopify.toast.show("Sélectionne ou renseigne un client", {
         isError: true,
       });
-      return;
+      return null;
     }
 
     if (lines.length === 0) {
       shopify.toast.show("Ajoute au moins un produit au devis", {
         isError: true,
       });
-      return;
+      return null;
     }
 
-    const quoteNumber = generateQuoteNumber();
+    setIsSaving(true);
+
+    try {
+      const response = await fetch("/app/api/quotes", {
+        method: savedQuote ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: savedQuote?.id,
+          customerShopifyId: selectedCustomer?.id,
+          customerName: clientName,
+          customerCompany: company,
+          customerAddress1: address1,
+          customerAddress2: address2,
+          customerZip: zip,
+          customerCity: city,
+          customerCountry: country,
+          customerEmail: email,
+          customerPhone: phone,
+          lines,
+        }),
+      });
+
+      const json = (await response.json()) as {
+        quote?: SavedQuote;
+        error?: string;
+      };
+
+      if (!response.ok || !json.quote) {
+        throw new Error(json.error || "Enregistrement impossible");
+      }
+
+      setSavedQuote(json.quote);
+      if (showSuccessToast) {
+        shopify.toast.show(`Devis ${json.quote.number} enregistré`);
+      }
+      return json.quote;
+    } catch (error) {
+      console.error("QUOTE_SAVE_ERROR", error);
+      shopify.toast.show("Impossible d’enregistrer le devis", {
+        isError: true,
+      });
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const generatePdf = async () => {
+    const quote = await saveQuote(false);
+    if (!quote) return;
+
+    const quoteNumber = quote.number;
 
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -526,12 +578,29 @@ export default function Index() {
         <s-badge>Version fichier : {APP_VERSION}</s-badge>
       </s-section>
 
-      <s-button slot="primary-action" variant="primary" onClick={generatePdf}>
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        disabled={isSaving}
+        onClick={generatePdf}
+      >
         Générer le PDF
+      </s-button>
+
+      <s-button
+        slot="secondary-actions"
+        disabled={isSaving}
+        onClick={() => void saveQuote()}
+      >
+        Enregistrer le brouillon
       </s-button>
 
       <s-section heading="Client">
         <s-stack gap="base">
+          {savedQuote && (
+            <s-badge>Devis enregistré : {savedQuote.number}</s-badge>
+          )}
+
           <s-text-field
             label="Rechercher un client Shopify"
             value={customerQuery}
