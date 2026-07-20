@@ -54,6 +54,29 @@ function fitText(text: string, font: PDFFont, size: number, maxWidth: number) {
   return `${value}...`;
 }
 
+function splitLongWord(
+  word: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+) {
+  const parts: string[] = [];
+  let part = "";
+
+  for (const char of word) {
+    const candidate = `${part}${char}`;
+    if (!part || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      part = candidate;
+    } else {
+      parts.push(part);
+      part = char;
+    }
+  }
+
+  if (part) parts.push(part);
+  return parts;
+}
+
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
   const lines: string[] = [];
   for (const paragraph of text.split(/\r?\n/)) {
@@ -65,7 +88,9 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
         line = candidate;
       } else {
         if (line) lines.push(line);
-        line = fitText(word, font, size, maxWidth);
+        const wordParts = splitLongWord(word, font, size, maxWidth);
+        lines.push(...wordParts.slice(0, -1));
+        line = wordParts.at(-1) || "";
       }
     }
     if (line) lines.push(line);
@@ -260,34 +285,43 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
   let y = drawTableHeader(page, 552);
   for (let index = 0; index < quote.lines.length; index += 1) {
     const line = quote.lines[index];
-    if (y < 180) {
+    const titleLines = wrapText(line.title, bold, 8.5, 170);
+    const rowHeight = Math.max(
+      43,
+      titleLines.length * 10 + (line.sku ? 21 : 12),
+    );
+
+    if (y - rowHeight < 130) {
       const continuation = await addContinuationPage();
       page = continuation.page;
       y = continuation.y;
     }
+    const skuY = y - titleLines.length * 10 - 3;
     const lineAmounts = amounts(line);
     const unitPriceHt = line.priceTtc / (1 + line.vatRate / 100);
     if (index % 2 === 1) {
       page.drawRectangle({
         x: 40,
-        y: y - 27,
+        y: y - rowHeight + 16,
         width: 515,
-        height: 43,
+        height: rowHeight,
         color: pale,
       });
     }
     await drawImage(pdf, page, line.imageUrl, 48, y - 19);
-    page.drawText(fitText(line.title, bold, 8.5, 170), {
-      x: 90,
-      y,
-      size: 8.5,
-      font: bold,
-      color: navy,
+    titleLines.forEach((value, lineIndex) => {
+      page.drawText(value, {
+        x: 90,
+        y: y - lineIndex * 10,
+        size: 8.5,
+        font: bold,
+        color: navy,
+      });
     });
     if (line.sku) {
       page.drawText(fitText(`Réf. ${line.sku}`, font, 7, 170), {
         x: 90,
-        y: y - 13,
+        y: skuY,
         size: 7,
         font,
         color: grey,
@@ -300,12 +334,12 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     drawRight(page, money(lineAmounts.ht), 497, y - 2, 7.5);
     drawRight(page, money(lineAmounts.ttc), 545, y - 2, 7.5, bold);
     page.drawLine({
-      start: { x: 40, y: y - 27 },
-      end: { x: 555, y: y - 27 },
+      start: { x: 40, y: y - rowHeight + 16 },
+      end: { x: 555, y: y - rowHeight + 16 },
       thickness: 0.35,
       color: rgb(0.85, 0.86, 0.88),
     });
-    y -= 43;
+    y -= rowHeight;
   }
 
   if (y < 390) {
