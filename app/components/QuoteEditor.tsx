@@ -4,7 +4,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { LegalInfo } from "../shop-settings.server";
 
-const APP_VERSION = "V1.16";
+const APP_VERSION = "V1.17";
+
+type DiscountType = "PERCENTAGE" | "AMOUNT";
 
 export type QuoteLine = {
   id: string;
@@ -14,7 +16,9 @@ export type QuoteLine = {
   quantity: number;
   priceTtc: number;
   vatRate: number;
+  discountType: DiscountType;
   discountPercent: number;
+  discountAmount: number;
   imageUrl: string;
 };
 
@@ -50,6 +54,8 @@ export type InitialQuote = {
   customerCountry: string;
   customerEmail: string;
   customerPhone: string;
+  globalDiscountPercent: number;
+  globalDiscountAmount: number;
   lines: QuoteLine[];
 };
 
@@ -75,6 +81,12 @@ type PickerProduct = {
 
 function formatMoney(value: number) {
   return `${value.toFixed(2).replace(".", ",")} €`;
+}
+
+function discountLabel(line: QuoteLine) {
+  return line.discountType === "AMOUNT"
+    ? formatMoney(line.discountAmount)
+    : `${line.discountPercent}%`;
 }
 
 function fitText(text: string, font: PDFFont, size: number, maxWidth: number) {
@@ -146,11 +158,74 @@ function pdfColor(hex: string, fallback: [number, number, number]) {
 
 function getLineAmounts(line: QuoteLine) {
   const grossTtc = line.priceTtc * line.quantity;
-  const discount = grossTtc * (line.discountPercent / 100);
+  const discount =
+    line.discountType === "AMOUNT"
+      ? Math.min(grossTtc, line.discountAmount)
+      : grossTtc * (line.discountPercent / 100);
   const ttc = grossTtc - discount;
   const ht = ttc / (1 + line.vatRate / 100);
   const vat = ttc - ht;
   return { grossTtc, discount, ht, vat, ttc };
+}
+
+function calculateTotals(
+  lines: QuoteLine[],
+  globalDiscountPercent: number,
+  globalDiscountAmount: number,
+) {
+  const lineAmounts = lines.map((line) => ({
+    line,
+    amounts: getLineAmounts(line),
+  }));
+  const totalAfterLineDiscounts = lineAmounts.reduce(
+    (sum, line) => sum + line.amounts.ttc,
+    0,
+  );
+  const globalPercentDiscount =
+    totalAfterLineDiscounts * (globalDiscountPercent / 100);
+  const remainingAfterPercent = Math.max(
+    0,
+    totalAfterLineDiscounts - globalPercentDiscount,
+  );
+  const effectiveGlobalAmountDiscount = Math.min(
+    remainingAfterPercent,
+    globalDiscountAmount,
+  );
+  const globalDiscountTotal =
+    globalPercentDiscount + effectiveGlobalAmountDiscount;
+
+  return lineAmounts.reduce(
+    (acc, item) => {
+      const share =
+        totalAfterLineDiscounts > 0
+          ? item.amounts.ttc / totalAfterLineDiscounts
+          : 0;
+      const ttc = Math.max(0, item.amounts.ttc - globalDiscountTotal * share);
+      const ht = ttc / (1 + item.line.vatRate / 100);
+
+      acc.ht += ht;
+      acc.vat += ttc - ht;
+      acc.ttc += ttc;
+      acc.lineDiscount += item.amounts.discount;
+      acc.globalPercentDiscount = globalPercentDiscount;
+      acc.globalAmountDiscount = effectiveGlobalAmountDiscount;
+      acc.discount =
+        acc.lineDiscount +
+        globalPercentDiscount +
+        effectiveGlobalAmountDiscount;
+
+      return acc;
+    },
+    {
+      ht: 0,
+      vat: 0,
+      ttc: 0,
+      discount: 0,
+      lineDiscount: 0,
+      globalPercentDiscount: 0,
+      globalAmountDiscount: 0,
+    },
+  );
 }
 
 function getProductImage(product: PickerProduct) {
@@ -240,6 +315,12 @@ export default function QuoteEditor({
   const [phone, setPhone] = useState(initialQuote?.customerPhone || "");
 
   const [lines, setLines] = useState<QuoteLine[]>(initialQuote?.lines || []);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState(
+    initialQuote?.globalDiscountPercent || 0,
+  );
+  const [globalDiscountAmount, setGlobalDiscountAmount] = useState(
+    initialQuote?.globalDiscountAmount || 0,
+  );
   const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(
     initialQuote ? { id: initialQuote.id, number: initialQuote.number } : null,
   );
@@ -308,7 +389,9 @@ export default function QuoteEditor({
           quantity: 1,
           priceTtc: 0,
           vatRate: 20,
+          discountType: "PERCENTAGE",
           discountPercent: 0,
+          discountAmount: 0,
           imageUrl,
         });
         return;
@@ -326,7 +409,9 @@ export default function QuoteEditor({
           quantity: 1,
           priceTtc: Number(variant.price || 0),
           vatRate: 20,
+          discountType: "PERCENTAGE",
           discountPercent: 0,
+          discountAmount: 0,
           imageUrl,
         });
       });
@@ -337,7 +422,12 @@ export default function QuoteEditor({
 
   const updateLineNumber = (
     id: string,
-    field: "quantity" | "priceTtc" | "vatRate" | "discountPercent",
+    field:
+      | "quantity"
+      | "priceTtc"
+      | "vatRate"
+      | "discountPercent"
+      | "discountAmount",
     value: number,
   ) => {
     if (!Number.isFinite(value)) return;
@@ -357,22 +447,32 @@ export default function QuoteEditor({
     );
   };
 
+  const updateLineDiscountType = (id: string, discountType: DiscountType) => {
+    setLines((current) =>
+      current.map((line) =>
+        line.id === id ? { ...line, discountType } : line,
+      ),
+    );
+  };
+
+  const updateGlobalDiscountPercent = (value: number) => {
+    if (!Number.isFinite(value)) return;
+    setGlobalDiscountPercent(Math.min(100, Math.max(0, value)));
+  };
+
+  const updateGlobalDiscountAmount = (value: number) => {
+    if (!Number.isFinite(value)) return;
+    setGlobalDiscountAmount(Math.max(0, value));
+  };
+
   const removeLine = (id: string) => {
     setLines((current) => current.filter((line) => line.id !== id));
   };
 
-  const totals = lines.reduce(
-    (acc, line) => {
-      const amounts = getLineAmounts(line);
-
-      acc.ht += amounts.ht;
-      acc.vat += amounts.vat;
-      acc.ttc += amounts.ttc;
-      acc.discount += amounts.discount;
-
-      return acc;
-    },
-    { ht: 0, vat: 0, ttc: 0, discount: 0 },
+  const totals = calculateTotals(
+    lines,
+    globalDiscountPercent,
+    globalDiscountAmount,
   );
 
   const saveQuote = async (showSuccessToast = true) => {
@@ -408,6 +508,8 @@ export default function QuoteEditor({
           customerCountry: country,
           customerEmail: email,
           customerPhone: phone,
+          globalDiscountPercent,
+          globalDiscountAmount,
           lines,
         }),
       });
@@ -668,7 +770,7 @@ export default function QuoteEditor({
       drawRight(page, String(line.quantity), 302, y - 2, 7.5, font);
       drawRight(page, formatMoney(unitPriceHt), 352, y - 2, 7.5, font);
       drawRight(page, formatMoney(line.priceTtc), 405, y - 2, 7.5, font);
-      drawRight(page, `${line.discountPercent}%`, 441, y - 2, 7.5, font);
+      drawRight(page, discountLabel(line), 441, y - 2, 7.5, font);
       drawRight(page, formatMoney(amounts.ht), 497, y - 2, 7.5, font);
       drawRight(page, formatMoney(amounts.ttc), 545, y - 2, 7.5, bold);
       page.drawLine({
@@ -686,7 +788,32 @@ export default function QuoteEditor({
       y = 680;
     }
 
-    const totalBoxHeight = totals.discount > 0 ? 118 : 96;
+    const totalRows: [string, string, boolean][] = [
+      ["Total HT", formatMoney(totals.ht), false],
+      ["TVA", formatMoney(totals.vat), false],
+    ];
+    if (totals.lineDiscount > 0) {
+      totalRows.push([
+        "Remises produits",
+        `-${formatMoney(totals.lineDiscount)}`,
+        false,
+      ]);
+    }
+    if (totals.globalPercentDiscount > 0) {
+      totalRows.push([
+        `Remise globale ${globalDiscountPercent}%`,
+        `-${formatMoney(totals.globalPercentDiscount)}`,
+        false,
+      ]);
+    }
+    if (totals.globalAmountDiscount > 0) {
+      totalRows.push([
+        "Remise globale €",
+        `-${formatMoney(totals.globalAmountDiscount)}`,
+        false,
+      ]);
+    }
+    const totalBoxHeight = Math.max(96, 58 + totalRows.length * 20);
     page.drawRectangle({
       x: 330,
       y: y - totalBoxHeight,
@@ -695,13 +822,6 @@ export default function QuoteEditor({
       color: lightGold,
     });
     let totalY = y - 25;
-    const totalRows: [string, string, boolean][] = [
-      ["Total HT", formatMoney(totals.ht), false],
-      ["TVA", formatMoney(totals.vat), false],
-    ];
-    if (totals.discount > 0) {
-      totalRows.push(["Remises", `-${formatMoney(totals.discount)}`, false]);
-    }
     totalRows.forEach(([label, value]) => {
       page.drawText(label, { x: 347, y: totalY, size: 9, font, color: grey });
       drawRight(page, value, 538, totalY, 9, font, navy);
@@ -1048,20 +1168,52 @@ export default function QuoteEditor({
                       }
                     />
 
-                    <s-number-field
-                      label="Remise (%)"
-                      min={0}
-                      max={100}
-                      step={0.1}
-                      value={String(line.discountPercent)}
-                      onInput={(event) =>
-                        updateLineNumber(
+                    <s-select
+                      label="Type de remise"
+                      value={line.discountType}
+                      onChange={(event) =>
+                        updateLineDiscountType(
                           line.id,
-                          "discountPercent",
-                          Number(event.currentTarget.value),
+                          event.currentTarget.value === "AMOUNT"
+                            ? "AMOUNT"
+                            : "PERCENTAGE",
                         )
                       }
-                    />
+                    >
+                      <s-option value="PERCENTAGE">Pourcentage</s-option>
+                      <s-option value="AMOUNT">Euros</s-option>
+                    </s-select>
+
+                    {line.discountType === "AMOUNT" ? (
+                      <s-number-field
+                        label="Remise (€)"
+                        min={0}
+                        step={0.01}
+                        value={String(line.discountAmount)}
+                        onInput={(event) =>
+                          updateLineNumber(
+                            line.id,
+                            "discountAmount",
+                            Number(event.currentTarget.value),
+                          )
+                        }
+                      />
+                    ) : (
+                      <s-number-field
+                        label="Remise (%)"
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        value={String(line.discountPercent)}
+                        onInput={(event) =>
+                          updateLineNumber(
+                            line.id,
+                            "discountPercent",
+                            Number(event.currentTarget.value),
+                          )
+                        }
+                      />
+                    )}
 
                     <s-text>HT : {formatMoney(amounts.ht)}</s-text>
                     <s-text>TVA : {formatMoney(amounts.vat)}</s-text>
@@ -1085,12 +1237,57 @@ export default function QuoteEditor({
         </s-stack>
       </s-section>
 
+      <s-section slot="aside" heading="Remise globale">
+        <s-stack gap="base">
+          <s-number-field
+            label="Remise globale (%)"
+            min={0}
+            max={100}
+            step={0.1}
+            value={String(globalDiscountPercent)}
+            onInput={(event) =>
+              updateGlobalDiscountPercent(Number(event.currentTarget.value))
+            }
+          />
+
+          <s-number-field
+            label="Remise globale (€)"
+            min={0}
+            step={0.01}
+            value={String(globalDiscountAmount)}
+            onInput={(event) =>
+              updateGlobalDiscountAmount(Number(event.currentTarget.value))
+            }
+          />
+
+          <s-paragraph>
+            La remise en % est appliquée avant la remise en €.
+          </s-paragraph>
+        </s-stack>
+      </s-section>
+
       <s-section slot="aside" heading="Totaux">
         <s-paragraph>Total HT : {formatMoney(totals.ht)}</s-paragraph>
         <s-paragraph>Total TVA : {formatMoney(totals.vat)}</s-paragraph>
+        {totals.lineDiscount > 0 && (
+          <s-paragraph>
+            Remises produits : -{formatMoney(totals.lineDiscount)}
+          </s-paragraph>
+        )}
+        {totals.globalPercentDiscount > 0 && (
+          <s-paragraph>
+            Remise globale {globalDiscountPercent}% : -
+            {formatMoney(totals.globalPercentDiscount)}
+          </s-paragraph>
+        )}
+        {totals.globalAmountDiscount > 0 && (
+          <s-paragraph>
+            Remise globale € : -{formatMoney(totals.globalAmountDiscount)}
+          </s-paragraph>
+        )}
         {totals.discount > 0 && (
           <s-paragraph>
-            Remises appliquées : -{formatMoney(totals.discount)}
+            Total remises : -{formatMoney(totals.discount)}
           </s-paragraph>
         )}
         <s-paragraph>Total TTC : {formatMoney(totals.ttc)}</s-paragraph>

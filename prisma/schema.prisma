@@ -74,31 +74,33 @@ model ShopSettings {
 }
 
 model Quote {
-  id                  String      @id @default(cuid())
-  shop                String
-  number              String
-  status              QuoteStatus @default(DRAFT)
-  customerShopifyId   String?
-  customerName        String
-  customerCompany     String?
-  customerAddress1    String?
-  customerAddress2    String?
-  customerZip         String?
-  customerCity        String?
-  customerCountry     String?
-  customerEmail       String?
-  customerPhone       String?
-  subtotalHt          Decimal     @db.Decimal(12, 2)
-  vatTotal            Decimal     @db.Decimal(12, 2)
-  discountTotal       Decimal     @db.Decimal(12, 2)
-  totalTtc            Decimal     @db.Decimal(12, 2)
-  shopifyDraftOrderId String?
-  shopifyOrderId      String?
-  shopifyOrderName    String?
-  convertedAt         DateTime?
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-  lines               QuoteLine[]
+  id                    String      @id @default(cuid())
+  shop                  String
+  number                String
+  status                QuoteStatus @default(DRAFT)
+  customerShopifyId     String?
+  customerName          String
+  customerCompany       String?
+  customerAddress1      String?
+  customerAddress2      String?
+  customerZip           String?
+  customerCity          String?
+  customerCountry       String?
+  customerEmail         String?
+  customerPhone         String?
+  subtotalHt            Decimal     @db.Decimal(12, 2)
+  vatTotal              Decimal     @db.Decimal(12, 2)
+  discountTotal         Decimal     @db.Decimal(12, 2)
+  globalDiscountPercent Decimal     @default(0) @db.Decimal(5, 2)
+  globalDiscountAmount  Decimal     @default(0) @db.Decimal(12, 2)
+  totalTtc              Decimal     @db.Decimal(12, 2)
+  shopifyDraftOrderId   String?
+  shopifyOrderId        String?
+  shopifyOrderName      String?
+  convertedAt           DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  lines                 QuoteLine[]
 
   @@unique([shop, number])
   @@index([shop, createdAt])
@@ -116,6 +118,8 @@ model QuoteLine {
   unitPriceTtc     Decimal @db.Decimal(12, 2)
   vatRate          Decimal @db.Decimal(5, 2)
   discountPercent  Decimal @db.Decimal(5, 2)
+  discountType     String  @default("PERCENTAGE")
+  discountAmount   Decimal @default(0) @db.Decimal(12, 2)
   imageUrl         String?
 
   @@index([quoteId, position])

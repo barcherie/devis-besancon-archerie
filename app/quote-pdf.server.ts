@@ -19,13 +19,17 @@ export type PdfQuote = {
   customerCountry: string;
   customerEmail: string;
   customerPhone: string;
+  globalDiscountPercent: number;
+  globalDiscountAmount: number;
   lines: {
     title: string;
     sku: string;
     quantity: number;
     priceTtc: number;
     vatRate: number;
+    discountType: "PERCENTAGE" | "AMOUNT";
     discountPercent: number;
+    discountAmount: number;
     imageUrl: string;
   }[];
 };
@@ -36,10 +40,71 @@ function money(value: number) {
 
 function amounts(line: PdfQuote["lines"][number]) {
   const grossTtc = line.priceTtc * line.quantity;
-  const discount = grossTtc * (line.discountPercent / 100);
+  const discount =
+    line.discountType === "AMOUNT"
+      ? Math.min(grossTtc, line.discountAmount)
+      : grossTtc * (line.discountPercent / 100);
   const ttc = grossTtc - discount;
   const ht = ttc / (1 + line.vatRate / 100);
   return { discount, ttc, ht, vat: ttc - ht };
+}
+
+function discountLabel(line: PdfQuote["lines"][number]) {
+  return line.discountType === "AMOUNT"
+    ? money(line.discountAmount)
+    : `${line.discountPercent}%`;
+}
+
+function calculateTotals(quote: PdfQuote) {
+  const lineAmounts = quote.lines.map((line) => ({
+    line,
+    amounts: amounts(line),
+  }));
+  const totalAfterLineDiscounts = lineAmounts.reduce(
+    (sum, line) => sum + line.amounts.ttc,
+    0,
+  );
+  const globalPercentDiscount =
+    totalAfterLineDiscounts * (quote.globalDiscountPercent / 100);
+  const remainingAfterPercent = Math.max(
+    0,
+    totalAfterLineDiscounts - globalPercentDiscount,
+  );
+  const globalAmountDiscount = Math.min(
+    remainingAfterPercent,
+    quote.globalDiscountAmount,
+  );
+  const globalDiscountTotal = globalPercentDiscount + globalAmountDiscount;
+
+  return lineAmounts.reduce(
+    (sum, item) => {
+      const share =
+        totalAfterLineDiscounts > 0
+          ? item.amounts.ttc / totalAfterLineDiscounts
+          : 0;
+      const ttc = Math.max(0, item.amounts.ttc - globalDiscountTotal * share);
+      const ht = ttc / (1 + item.line.vatRate / 100);
+
+      sum.ht += ht;
+      sum.vat += ttc - ht;
+      sum.ttc += ttc;
+      sum.lineDiscount += item.amounts.discount;
+      sum.globalPercentDiscount = globalPercentDiscount;
+      sum.globalAmountDiscount = globalAmountDiscount;
+      sum.discount =
+        sum.lineDiscount + globalPercentDiscount + globalAmountDiscount;
+      return sum;
+    },
+    {
+      ht: 0,
+      vat: 0,
+      ttc: 0,
+      discount: 0,
+      lineDiscount: 0,
+      globalPercentDiscount: 0,
+      globalAmountDiscount: 0,
+    },
+  );
 }
 
 function fitText(text: string, font: PDFFont, size: number, maxWidth: number) {
@@ -330,7 +395,7 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     drawRight(page, String(line.quantity), 302, y - 2, 7.5);
     drawRight(page, money(unitPriceHt), 352, y - 2, 7.5);
     drawRight(page, money(line.priceTtc), 405, y - 2, 7.5);
-    drawRight(page, `${line.discountPercent}%`, 441, y - 2, 7.5);
+    drawRight(page, discountLabel(line), 441, y - 2, 7.5);
     drawRight(page, money(lineAmounts.ht), 497, y - 2, 7.5);
     drawRight(page, money(lineAmounts.ttc), 545, y - 2, 7.5, bold);
     page.drawLine({
@@ -348,18 +413,24 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     y = 680;
   }
 
-  const totals = quote.lines.reduce(
-    (sum, line) => {
-      const value = amounts(line);
-      sum.ht += value.ht;
-      sum.vat += value.vat;
-      sum.ttc += value.ttc;
-      sum.discount += value.discount;
-      return sum;
-    },
-    { ht: 0, vat: 0, ttc: 0, discount: 0 },
-  );
-  const totalBoxHeight = totals.discount > 0 ? 118 : 96;
+  const totals = calculateTotals(quote);
+  const rows: [string, string][] = [
+    ["Total HT", money(totals.ht)],
+    ["TVA", money(totals.vat)],
+  ];
+  if (totals.lineDiscount > 0) {
+    rows.push(["Remises produits", `-${money(totals.lineDiscount)}`]);
+  }
+  if (totals.globalPercentDiscount > 0) {
+    rows.push([
+      `Remise globale ${quote.globalDiscountPercent}%`,
+      `-${money(totals.globalPercentDiscount)}`,
+    ]);
+  }
+  if (totals.globalAmountDiscount > 0) {
+    rows.push(["Remise globale €", `-${money(totals.globalAmountDiscount)}`]);
+  }
+  const totalBoxHeight = Math.max(96, 58 + rows.length * 20);
   page.drawRectangle({
     x: 330,
     y: y - totalBoxHeight,
@@ -368,11 +439,6 @@ export async function createQuotePdf(quote: PdfQuote, legal: LegalInfo) {
     color: lightGold,
   });
   let totalY = y - 25;
-  const rows: [string, string][] = [
-    ["Total HT", money(totals.ht)],
-    ["TVA", money(totals.vat)],
-  ];
-  if (totals.discount > 0) rows.push(["Remises", `-${money(totals.discount)}`]);
   rows.forEach(([label, value]) => {
     page.drawText(label, { x: 347, y: totalY, size: 9, font, color: grey });
     drawRight(page, value, 538, totalY, 9);

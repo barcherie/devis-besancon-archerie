@@ -42,6 +42,20 @@ function firstError(errors: ShopifyUserError[] | undefined) {
   return errors?.[0]?.message;
 }
 
+function getLineDiscount(line: {
+  quantity: unknown;
+  unitPriceTtc: unknown;
+  discountType: string;
+  discountPercent: unknown;
+  discountAmount: unknown;
+}) {
+  const grossTtc = Number(line.unitPriceTtc) * Number(line.quantity);
+  if (line.discountType === "AMOUNT") {
+    return Math.min(grossTtc, Number(line.discountAmount));
+  }
+  return grossTtc * (Number(line.discountPercent) / 100);
+}
+
 async function saveConvertedOrder(
   quoteId: string,
   draftOrderId: string,
@@ -139,15 +153,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (!draftOrderId) {
+      const totalAfterLineDiscounts = quote.lines.reduce((sum, line) => {
+        const grossTtc = Number(line.unitPriceTtc) * Number(line.quantity);
+        return sum + Math.max(0, grossTtc - getLineDiscount(line));
+      }, 0);
+      const globalPercentDiscount =
+        totalAfterLineDiscounts * (Number(quote.globalDiscountPercent) / 100);
+      const remainingAfterPercent = Math.max(
+        0,
+        totalAfterLineDiscounts - globalPercentDiscount,
+      );
+      const globalAmountDiscount = Math.min(
+        remainingAfterPercent,
+        Number(quote.globalDiscountAmount),
+      );
+      const globalDiscountTotal = globalPercentDiscount + globalAmountDiscount;
+
       const lineItems = quote.lines.map((line) => {
-        const discountPercent = Number(line.discountPercent);
+        const discount = getLineDiscount(line);
         const appliedDiscount =
-          discountPercent > 0
+          discount > 0
             ? {
                 title: `Remise ${quote.number}`,
                 description: "Remise issue du devis",
-                value: discountPercent,
-                valueType: "PERCENTAGE",
+                value:
+                  line.discountType === "AMOUNT"
+                    ? Number(line.discountAmount)
+                    : Number(line.discountPercent),
+                valueType:
+                  line.discountType === "AMOUNT"
+                    ? "FIXED_AMOUNT"
+                    : "PERCENTAGE",
               }
             : undefined;
 
@@ -186,9 +222,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       };
       const hasAddress = Boolean(
         quote.customerAddress1 ||
-          quote.customerCity ||
-          quote.customerZip ||
-          quote.customerCountry,
+        quote.customerCity ||
+        quote.customerZip ||
+        quote.customerCountry,
       );
 
       const createResponse = await admin.graphql(
@@ -222,6 +258,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               tags: ["devis", quote.number],
               visibleToCustomer: true,
               lineItems,
+              appliedDiscount:
+                globalDiscountTotal > 0
+                  ? {
+                      title: `Remise globale ${quote.number}`,
+                      description: [
+                        Number(quote.globalDiscountPercent) > 0
+                          ? `${Number(quote.globalDiscountPercent)}%`
+                          : "",
+                        Number(quote.globalDiscountAmount) > 0
+                          ? `${Number(quote.globalDiscountAmount).toFixed(2)} €`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" + "),
+                      value: Number(globalDiscountTotal.toFixed(2)),
+                      valueType: "FIXED_AMOUNT",
+                    }
+                  : undefined,
             },
           },
         },
@@ -233,7 +287,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const createError = firstError(createResult?.userErrors);
 
       if (createError || !createResult?.draftOrder?.id) {
-        throw new Error(createError || "Création du brouillon Shopify impossible");
+        throw new Error(
+          createError || "Création du brouillon Shopify impossible",
+        );
       }
 
       draftOrderId = createResult.draftOrder.id;

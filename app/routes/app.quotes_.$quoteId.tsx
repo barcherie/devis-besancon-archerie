@@ -42,6 +42,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       customerCountry: quote.customerCountry || "",
       customerEmail: quote.customerEmail || "",
       customerPhone: quote.customerPhone || "",
+      globalDiscountPercent: Number(quote.globalDiscountPercent),
+      globalDiscountAmount: Number(quote.globalDiscountAmount),
       lines: quote.lines.map((line) => ({
         id: line.id,
         variantId: line.shopifyVariantId || undefined,
@@ -50,7 +52,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         quantity: Number(line.quantity),
         priceTtc: Number(line.unitPriceTtc),
         vatRate: Number(line.vatRate),
+        discountType:
+          line.discountType === "AMOUNT"
+            ? ("AMOUNT" as const)
+            : ("PERCENTAGE" as const),
         discountPercent: Number(line.discountPercent),
+        discountAmount: Number(line.discountAmount),
         imageUrl: line.imageUrl || "",
       })),
     },

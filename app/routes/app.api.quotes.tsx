@@ -10,7 +10,9 @@ type QuoteLineInput = {
   quantity: number;
   priceTtc: number;
   vatRate: number;
+  discountType: "PERCENTAGE" | "AMOUNT";
   discountPercent: number;
+  discountAmount: number;
   imageUrl: string;
 };
 
@@ -26,6 +28,8 @@ type QuoteInput = {
   customerCountry: string;
   customerEmail: string;
   customerPhone: string;
+  globalDiscountPercent: number;
+  globalDiscountAmount: number;
   lines: QuoteLineInput[];
 };
 
@@ -40,6 +44,10 @@ function optionalString(value: unknown, maxLength = 500) {
 function parseNumber(value: unknown, min: number, max: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(max, Math.max(min, value));
+}
+
+function parseDiscountType(value: unknown): "PERCENTAGE" | "AMOUNT" {
+  return value === "AMOUNT" ? "AMOUNT" : "PERCENTAGE";
 }
 
 function parseQuoteInput(value: unknown): QuoteInput | null {
@@ -59,14 +67,17 @@ function parseQuoteInput(value: unknown): QuoteInput | null {
     const quantity = parseNumber(item.quantity, 0.01, 100000);
     const priceTtc = parseNumber(item.priceTtc, 0, 10000000);
     const vatRate = parseNumber(item.vatRate, 0, 100);
+    const discountType = parseDiscountType(item.discountType);
     const discountPercent = parseNumber(item.discountPercent, 0, 100);
+    const discountAmount = parseNumber(item.discountAmount, 0, 10000000);
 
     if (
       !title ||
       quantity === null ||
       priceTtc === null ||
       vatRate === null ||
-      discountPercent === null
+      discountPercent === null ||
+      discountAmount === null
     ) {
       return null;
     }
@@ -78,7 +89,9 @@ function parseQuoteInput(value: unknown): QuoteInput | null {
       quantity,
       priceTtc,
       vatRate,
+      discountType,
       discountPercent,
+      discountAmount,
       imageUrl: optionalString(item.imageUrl, 2000),
     });
   }
@@ -96,21 +109,60 @@ function parseQuoteInput(value: unknown): QuoteInput | null {
     customerCountry: optionalString(value.customerCountry, 200),
     customerEmail: optionalString(value.customerEmail, 320),
     customerPhone: optionalString(value.customerPhone, 100),
+    globalDiscountPercent:
+      parseNumber(value.globalDiscountPercent, 0, 100) ?? 0,
+    globalDiscountAmount:
+      parseNumber(value.globalDiscountAmount, 0, 10000000) ?? 0,
     lines,
   };
 }
 
-function calculateTotals(lines: QuoteLineInput[]) {
-  return lines.reduce(
-    (totals, line) => {
-      const grossTtc = line.priceTtc * line.quantity;
-      const discount = grossTtc * (line.discountPercent / 100);
-      const totalTtc = grossTtc - discount;
-      const subtotalHt = totalTtc / (1 + line.vatRate / 100);
+function getLineDiscount(line: QuoteLineInput) {
+  const grossTtc = line.priceTtc * line.quantity;
+  if (line.discountType === "AMOUNT") {
+    return Math.min(grossTtc, line.discountAmount);
+  }
+  return grossTtc * (line.discountPercent / 100);
+}
+
+function calculateTotals(input: QuoteInput) {
+  const lineAmounts = input.lines.map((line) => {
+    const grossTtc = line.priceTtc * line.quantity;
+    const discount = getLineDiscount(line);
+    const totalTtc = Math.max(0, grossTtc - discount);
+    return { line, discount, totalTtc };
+  });
+  const totalAfterLineDiscounts = lineAmounts.reduce(
+    (sum, line) => sum + line.totalTtc,
+    0,
+  );
+  const globalPercentDiscount =
+    totalAfterLineDiscounts * (input.globalDiscountPercent / 100);
+  const remainingAfterPercent = Math.max(
+    0,
+    totalAfterLineDiscounts - globalPercentDiscount,
+  );
+  const globalAmountDiscount = Math.min(
+    remainingAfterPercent,
+    input.globalDiscountAmount,
+  );
+  const globalDiscountTotal = globalPercentDiscount + globalAmountDiscount;
+
+  return lineAmounts.reduce(
+    (totals, lineAmount) => {
+      const share =
+        totalAfterLineDiscounts > 0
+          ? lineAmount.totalTtc / totalAfterLineDiscounts
+          : 0;
+      const totalTtc = Math.max(
+        0,
+        lineAmount.totalTtc - globalDiscountTotal * share,
+      );
+      const subtotalHt = totalTtc / (1 + lineAmount.line.vatRate / 100);
 
       totals.subtotalHt += subtotalHt;
       totals.vatTotal += totalTtc - subtotalHt;
-      totals.discountTotal += discount;
+      totals.discountTotal += lineAmount.discount + globalDiscountTotal * share;
       totals.totalTtc += totalTtc;
       return totals;
     },
@@ -130,10 +182,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const input = parseQuoteInput(await request.json().catch(() => null));
   if (!input) {
-    return Response.json({ error: "Données du devis invalides" }, { status: 400 });
+    return Response.json(
+      { error: "Données du devis invalides" },
+      { status: 400 },
+    );
   }
 
-  const totals = calculateTotals(input.lines);
+  const totals = calculateTotals(input);
   const quoteData = {
     customerShopifyId: input.customerShopifyId,
     customerName: input.customerName,
@@ -148,6 +203,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     subtotalHt: totals.subtotalHt,
     vatTotal: totals.vatTotal,
     discountTotal: totals.discountTotal,
+    globalDiscountPercent: input.globalDiscountPercent,
+    globalDiscountAmount: input.globalDiscountAmount,
     totalTtc: totals.totalTtc,
     lines: {
       create: input.lines.map((line, position) => ({
@@ -158,7 +215,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         quantity: line.quantity,
         unitPriceTtc: line.priceTtc,
         vatRate: line.vatRate,
+        discountType: line.discountType,
         discountPercent: line.discountPercent,
+        discountAmount: line.discountAmount,
         imageUrl: line.imageUrl || null,
       })),
     },
