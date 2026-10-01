@@ -4,7 +4,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 
 import type { LegalInfo } from "../shop-settings.server";
 
-const APP_VERSION = "V1.17";
+const APP_VERSION = "V1.18";
 
 type DiscountType = "PERCENTAGE" | "AMOUNT";
 
@@ -420,6 +420,37 @@ export default function QuoteEditor({
     setLines((current) => [...current, ...newLines]);
   };
 
+  const addCustomProduct = () => {
+    setLines((current) => [
+      ...current,
+      {
+        id: `custom-${crypto.randomUUID()}`,
+        variantId: undefined,
+        title: "Produit libre",
+        sku: "",
+        quantity: 1,
+        priceTtc: 0,
+        vatRate: 20,
+        discountType: "PERCENTAGE",
+        discountPercent: 0,
+        discountAmount: 0,
+        imageUrl: "",
+      },
+    ]);
+  };
+
+  const updateLineText = (
+    id: string,
+    field: "title" | "sku",
+    value: string,
+  ) => {
+    setLines((current) =>
+      current.map((line) =>
+        line.id === id ? { ...line, [field]: value } : line,
+      ),
+    );
+  };
+
   const updateLineNumber = (
     id: string,
     field:
@@ -485,6 +516,13 @@ export default function QuoteEditor({
 
     if (lines.length === 0) {
       shopify.toast.show("Ajoute au moins un produit au devis", {
+        isError: true,
+      });
+      return null;
+    }
+
+    if (lines.some((line) => !line.title.trim())) {
+      shopify.toast.show("Renseigne le nom de chaque produit libre", {
         isError: true,
       });
       return null;
@@ -1090,7 +1128,12 @@ export default function QuoteEditor({
 
       <s-section heading="Produits du devis">
         <s-stack gap="base">
-          <s-button onClick={addProducts}>Sélectionner des produits</s-button>
+          <s-stack direction="inline" gap="small">
+            <s-button onClick={addProducts}>Sélectionner des produits</s-button>
+            <s-button onClick={addCustomProduct}>
+              Ajouter un produit libre
+            </s-button>
+          </s-stack>
 
           {lines.length === 0 && (
             <s-paragraph>Aucun produit sélectionné pour le moment.</s-paragraph>
@@ -1120,9 +1163,39 @@ export default function QuoteEditor({
                     />
                   )}
 
-                  <s-heading>{line.title}</s-heading>
+                  {line.variantId ? (
+                    <s-heading>{line.title}</s-heading>
+                  ) : (
+                    <s-stack gap="small">
+                      <s-badge>Produit libre</s-badge>
+                      <s-text-field
+                        label="Nom du produit"
+                        value={line.title}
+                        onInput={(event) =>
+                          updateLineText(
+                            line.id,
+                            "title",
+                            event.currentTarget.value,
+                          )
+                        }
+                      />
+                      <s-text-field
+                        label="SKU / référence (optionnel)"
+                        value={line.sku}
+                        onInput={(event) =>
+                          updateLineText(
+                            line.id,
+                            "sku",
+                            event.currentTarget.value,
+                          )
+                        }
+                      />
+                    </s-stack>
+                  )}
 
-                  {line.sku && <s-text>SKU : {line.sku}</s-text>}
+                  {line.variantId && line.sku && (
+                    <s-text>SKU : {line.sku}</s-text>
+                  )}
 
                   <s-stack direction="inline" gap="base">
                     <s-number-field
